@@ -266,6 +266,7 @@ undo_info_funcs.marker = function(data)
 end
 
 
+-- override the worldedit vmanip finish function to catch the data table
 local we_data = false
 local we_manip_end = worldedit.manip_helpers.finish
 function worldedit.manip_helpers.finish(manip, data)
@@ -273,6 +274,46 @@ function worldedit.manip_helpers.finish(manip, data)
 		we_data = data
 	end
 	return we_manip_end(manip, data)
+end
+
+local function compress_nodedata(indices, nodeids)
+	-- indices contain 3 * 16 = 48 bit values
+	-- nodeids contain 16 bit values (see mapnode.h)
+	-- big endian here
+	local data = {}
+	for i = 1,#indices do
+		local v = ""
+		for f = 5,0,-1 do
+			v = v .. string.char(math.floor(indices[i] * 2^(-8*f)) % 0x100)
+			data[i] = v
+		end
+	end
+	for i = 1,#nodeids do
+		data[#data+1] = string.char(math.floor(nodeids[i] * 2^-8)) ..
+			string.char(nodeids[i] % 0x100)
+	end
+	return minetest.compress(table.concat(data))
+end
+
+local function decompress_nodedata(compressed_data, count)
+	local indices = {}
+	local nodeids = {}
+	local data = minetest.decompress(compressed_data)
+	assert(#data == count * (6 + 2), "invalid decompressed data")
+	local p = 1
+	for i = 1,count do
+		local v = 0
+		for f = 5,0,-1 do
+			v = v + 2^(8*f) * data:byte(p)
+			p = p+1
+		end
+		indices[i] = v
+	end
+	for i = 1,count do
+		nodeids[i] = data:byte(p) * 0x100 + data:byte(p+1)
+		p = p + 2
+	end
+	return indices, nodeids
 end
 
 local we_set = worldedit.set
@@ -310,14 +351,16 @@ local my_we_set = function(pos1, pos2, ...)
 	end
 	we_data = false
 
+	local compressed_data = compress_nodedata(indices, nodeids)
 	add_to_history({
 		type = "nodeids",
-		mem_use = 9 * (2 * 7 + 2 * #nodeids + 2),
+		mem_use = 9 * (2 * 7 + #compressed_data),
 		pos1 = pos1,
 		pos2 = pos2,
-		nodeids = nodeids,
-		indices = indices,
+		count = #nodeids,
+		compressed_data = compressed_data
 	}, command_invoker)
+	-- Note: param1, param2 and metadata are not changed by worldedit.set
 
 	return rv
 end
@@ -336,6 +379,9 @@ undo_funcs.nodeids = function(name, data)
 	local ylen = pos2.y - pos1.y + 1
 	local ystride = pos2.x - pos1.x + 1
 
+	local indices, nodeids = decompress_nodedata(data.compressed_data,
+		data.count)
+
 	local manip = minetest.get_voxel_manip()
 	local e1, e2 = manip:read_from_map(pos1, pos2)
 	local area = VoxelArea:new{MinEdge=e1, MaxEdge=e2}
@@ -343,27 +389,25 @@ undo_funcs.nodeids = function(name, data)
 
 	-- swap the nodes in the world and history data
 	local new_nodeids = {}
-	for k = 1,#data.indices do
-		local i = data.indices[k]
+	for k = 1,#indices do
+		local i = indices[k]
 		local x = i % ystride
 		local y = math.floor(i / ystride) % ylen
 		local z = math.floor(i / (ystride * ylen))
 		local vi = area:index(pos1.x + x, pos1.y + y, pos1.z + z)
 		new_nodeids[k] = mdata[vi]
-		mdata[vi] = data.nodeids[k]
+		mdata[vi] = nodeids[k]
 	end
 
 	manip:set_data(mdata)
 	manip:write_to_map()
 
-	data.nodeids = new_nodeids
+	data.compressed_data = compress_nodedata(indices, new_nodeids)
 
-	worldedit.player_notify(name, #data.indices .. " nodes set")
+	worldedit.player_notify(name, data.count .. " nodes set")
 end
-undo_info_funcs.marker = function(data)
-	if not data.pos then
-		return "Set pos" .. data.id
-	end
-	return "changed pos" .. data.id .. ", previous value: " ..
-		minetest.pos_to_string(data.pos)
+undo_info_funcs.nodeids = function(data)
+	return "pos1: " .. minetest.pos_to_string(data.pos1) .. ", pos2: " ..
+		minetest.pos_to_string(data.pos2) .. ", " .. data.count ..
+		" nodes changed"
 end

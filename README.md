@@ -12,7 +12,6 @@ Ignored chatcommands:
 
 
 TODO:
-* Compress nodeids and indices (string.byte, nodeid bits)
 * Implement more commands
 * Add mod load time info
 * Add settingtypes.txt for the settings
