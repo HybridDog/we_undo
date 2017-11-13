@@ -276,44 +276,53 @@ function worldedit.manip_helpers.finish(manip, data)
 	return we_manip_end(manip, data)
 end
 
-local function compress_nodedata(indices, nodeids)
-	-- indices contain 3 * 16 = 48 bit values
+local function compress_nodedata(nodedata)
 	-- nodeids contain 16 bit values (see mapnode.h)
 	-- big endian here
 	local data = {}
-	for i = 1,#indices do
+	local prev_index = 0
+	for i = 1,#nodedata.indices do
+		local index = nodedata.indices[i]
+		local off = index - prev_index -- always > 0
 		local v = ""
-		for f = 5,0,-1 do
-			v = v .. string.char(math.floor(indices[i] * 2^(-8*f)) % 0x100)
+		for f = nodedata.index_bytes, 0, -1 do
+			v = v .. string.char(math.floor(off * 2^(-8*f)) % 0x100)
 			data[i] = v
 		end
+		prev_index = index
 	end
-	for i = 1,#nodeids do
-		data[#data+1] = string.char(math.floor(nodeids[i] * 2^-8)) ..
-			string.char(nodeids[i] % 0x100)
+	for i = 1,#nodedata.nodeids do
+		data[#data+1] = string.char(math.floor(nodedata.nodeids[i] * 2^-8)) ..
+			string.char(nodedata.nodeids[i] % 0x100)
 	end
 	return minetest.compress(table.concat(data))
 end
 
-local function decompress_nodedata(compressed_data, count)
+local function decompress_nodedata(ccontent)
 	local indices = {}
 	local nodeids = {}
-	local data = minetest.decompress(compressed_data)
-	assert(#data == count * (6 + 2), "invalid decompressed data")
+	local data = minetest.decompress(ccontent.compressed_data)
+	local nodeids_cnt = ccontent.nodeids_cnt
+	assert(#data == nodeids_cnt * (ccontent.index_bytes+1 + 2),
+		"invalid decompressed data")
 	local p = 1
-	for i = 1,count do
-		local v = 0
-		for f = 5,0,-1 do
+	local prev_index = 0
+	for i = 1,nodeids_cnt do
+		local v = prev_index
+		for f = ccontent.index_bytes, 0, -1 do
 			v = v + 2^(8*f) * data:byte(p)
 			p = p+1
 		end
 		indices[i] = v
+		prev_index = v
 	end
-	for i = 1,count do
+	for i = 1,nodeids_cnt do
 		nodeids[i] = data:byte(p) * 0x100 + data:byte(p+1)
 		p = p + 2
 	end
-	return indices, nodeids
+	--~ print("compression factor: " ..
+		--~ (nodeids_cnt * 9) / #ccontent.compressed_data)
+	return {indices = indices, nodeids = nodeids}
 end
 
 local we_set = worldedit.set
@@ -351,13 +360,21 @@ local my_we_set = function(pos1, pos2, ...)
 	end
 	we_data = false
 
-	local compressed_data = compress_nodedata(indices, nodeids)
+	-- can be 0 if only one node is changed
+	local index_bytes = math.ceil(math.log(worldedit.volume(pos1, pos2)) /
+		math.log(8))
+	local compressed_data = compress_nodedata{
+		indices = indices,
+		nodeids = nodeids,
+		index_bytes = index_bytes,
+	}
 	add_to_history({
 		type = "nodeids",
 		mem_use = 9 * (2 * 7 + #compressed_data),
 		pos1 = pos1,
 		pos2 = pos2,
 		count = #nodeids,
+		index_bytes = index_bytes,
 		compressed_data = compressed_data
 	}, command_invoker)
 	-- Note: param1, param2 and metadata are not changed by worldedit.set
@@ -379,8 +396,13 @@ undo_funcs.nodeids = function(name, data)
 	local ylen = pos2.y - pos1.y + 1
 	local ystride = pos2.x - pos1.x + 1
 
-	local indices, nodeids = decompress_nodedata(data.compressed_data,
-		data.count)
+	local decompressed_data = decompress_nodedata{
+		compressed_data = data.compressed_data,
+		nodeids_cnt = data.count,
+		index_bytes = data.index_bytes
+	}
+	local indices = decompressed_data.indices
+	local nodeids = decompressed_data.nodeids
 
 	local manip = minetest.get_voxel_manip()
 	local e1, e2 = manip:read_from_map(pos1, pos2)
@@ -402,7 +424,11 @@ undo_funcs.nodeids = function(name, data)
 	manip:set_data(mdata)
 	manip:write_to_map()
 
-	data.compressed_data = compress_nodedata(indices, new_nodeids)
+	data.compressed_data = compress_nodedata{
+		indices = indices,
+		nodeids = new_nodeids,
+		index_bytes = data.index_bytes
+	}
 
 	worldedit.player_notify(name, data.count .. " nodes set")
 end
