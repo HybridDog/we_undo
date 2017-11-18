@@ -7,16 +7,17 @@ Related issues:
 * https://forum.minetest.net/viewtopic.php?p=296543#p296543
 
 Supported chatcommands:
-* pos1
-* pos2
-* set (without //y)
+* /pos1
+* /pos2
+* /p
+* /set (without /y confirmation)
 
 Ignored chatcommands:
-* fixlight
+* /fixlight
 
 
 TODO:
-* Make it also work on command confirmation (//y)
+* Make it also work on command confirmation (/y)
 * Implement more commands
 * Add mod load time info
 * Add settingtypes.txt for the settings

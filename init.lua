@@ -55,6 +55,7 @@ end
 local journal = {}
 local function add_to_history(data, name)
 	name = name or command_invoker
+	assert(name, "Player name isn't known")
 	journal[name] = journal[name] or {
 		ring = {},
 		start = 0,
@@ -242,6 +243,28 @@ override_chatcommand("/pos2",
 		}
 	end
 )
+
+-- Punch before the /p command's punch
+table.insert(minetest.registered_on_punchnodes, 1, function(_,_, player)
+	local name = player:get_player_name()
+	local typ = worldedit.set_pos[name]
+	if typ == "pos1"
+	or typ == "pos1only" then
+		add_to_history({
+			type = "marker",
+			mem_use = 9 * 7,
+			id = 1,
+			pos = worldedit.pos1[name]
+		}, name)
+	elseif typ == "pos2" then
+		add_to_history({
+			type = "marker",
+			mem_use = 9 * 7,
+			id = 2,
+			pos = worldedit.pos2[name]
+		}, name)
+	end
+end)
 
 undo_funcs.marker = function(name, data)
 	local pos = data.pos
