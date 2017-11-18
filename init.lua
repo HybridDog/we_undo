@@ -289,6 +289,53 @@ undo_info_funcs.marker = function(data)
 end
 
 
+-- Catch confirmation requests (/y or /n follows)
+local y_pending = {}
+local we_notify = worldedit.player_notify
+function worldedit.player_notify(name, msg)
+	if msg:sub(1, 43) == "WARNING: this operation could affect up to " then
+		y_pending[name] = true
+	end
+	return we_notify(name, msg)
+end
+
+override_chatcommand("/n",
+	function()
+		y_pending[command_invoker] = nil
+	end
+)
+
+override_chatcommand("/y",
+	function(...)
+		local t = y_pending[command_invoker]
+		if type(t) == "table"
+		and t.before then
+			t.before(...)
+		end
+	end,
+	function(...)
+		local t = y_pending[command_invoker]
+		if type(t) == "table"
+		and t.after then
+			t.after(...)
+		end
+		y_pending[command_invoker] = nil
+	end
+)
+
+local function override_cc_with_confirm(cname, func_before, actual_func_after)
+	-- remember the functions for /y if needed
+	local function func_after(...)
+		if y_pending[command_invoker] then
+			y_pending[command_invoker] = {before = func_before,
+				after = func_after}
+		end
+		return actual_func_after(...)
+	end
+	return override_chatcommand(cname, func_before, func_after)
+end
+
+
 -- override the worldedit vmanip finish function to catch the data table
 local we_data = false
 local we_manip_end = worldedit.manip_helpers.finish
@@ -404,7 +451,7 @@ local my_we_set = function(pos1, pos2, ...)
 
 	return rv
 end
-override_chatcommand("/set",
+override_cc_with_confirm("/set",
 	function()
 		worldedit.set = my_we_set
 	end,

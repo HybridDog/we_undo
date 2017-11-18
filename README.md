@@ -10,14 +10,15 @@ Supported chatcommands:
 * /pos1
 * /pos2
 * /p
-* /set (without /y confirmation)
+* /set
+* /y
+* /n
 
 Ignored chatcommands:
 * /fixlight
 
 
 TODO:
-* Make it also work on command confirmation (/y)
 * Implement more commands
 * Add mod load time info
 * Add settingtypes.txt for the settings
