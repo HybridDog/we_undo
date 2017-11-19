@@ -16,6 +16,7 @@ Supported chatcommands:
 
 Ignored chatcommands:
 * /fixlight
+* /volume
 
 
 TODO:
