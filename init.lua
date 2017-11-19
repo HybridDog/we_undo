@@ -80,7 +80,6 @@ local function add_to_history(data, name)
 			and j.entry_count == max_commands)
 	end
 	if j.entry_count-1 > j.off_start then
-		print(j.off_start, j.entry_count)
 		-- remove redo remnants
 		for i = j.off_start+1, j.entry_count-1 do
 			local im = (j.start + i) % max_commands
@@ -346,57 +345,111 @@ function worldedit.manip_helpers.finish(manip, data)
 	return we_manip_end(manip, data)
 end
 
+local indic_names = {"indices_n", "indices_p1", "indices_p2", "indices_m"}
 local function compress_nodedata(nodedata)
+	local data = {}
+	-- put indices first
+	for j = 1,#indic_names do
+		local indices = nodedata[indic_names[j]]
+		if indices then
+			local prev_index = 0
+			for i = 1,#indices do
+				local index = indices[i]
+				local off = index - prev_index -- always > 0
+				local v = ""
+				for f = nodedata.index_bytes, 0, -1 do
+					v = v .. string.char(math.floor(off * 2^(-8*f)) % 0x100)
+				end
+				data[#data+1] = v
+				prev_index = index
+			end
+		end
+	end
 	-- nodeids contain 16 bit values (see mapnode.h)
 	-- big endian here
-	local data = {}
-	local prev_index = 0
-	for i = 1,#nodedata.indices do
-		local index = nodedata.indices[i]
-		local off = index - prev_index -- always > 0
-		local v = ""
-		for f = nodedata.index_bytes, 0, -1 do
-			v = v .. string.char(math.floor(off * 2^(-8*f)) % 0x100)
-			data[i] = v
+	if nodedata.indices_n then
+		for i = 1,#nodedata.nodeids do
+			data[#data+1] = string.char(math.floor(nodedata.nodeids[i] * 2^-8)
+				) .. string.char(nodedata.nodeids[i] % 0x100)
 		end
-		prev_index = index
 	end
-	for i = 1,#nodedata.nodeids do
-		data[#data+1] = string.char(math.floor(nodedata.nodeids[i] * 2^-8)) ..
-			string.char(nodedata.nodeids[i] % 0x100)
+	-- param1 and param2 are 4 bit values
+	for j = 1,2 do
+		if nodedata["indices_p" .. j] then
+			local vs = nodedata["param" .. j .. "s"]
+			local bytescnt = math.ceil(#vs / 2)
+			for i = 1,bytescnt do
+				-- put two values in one byte
+				local v = vs[2 * i - 1] * 0x10 + (vs[2 * i] or 0)
+				data[#data+1] = string.char(v)
+			end
+		end
+	end
+	-- meta…
+	if nodedata.indices_m then
+		data[#data+1] = minetest.serialize(nodedata.metastrings)
 	end
 	return minetest.compress(table.concat(data))
 end
 
+local cnt_names = {"nodeids_cnt", "param1s_cnt", "param2s_cnt", "metaens_cnt"}
 local function decompress_nodedata(ccontent)
-	local indices = {}
-	local nodeids = {}
+	local result = {}
 	local data = minetest.decompress(ccontent.compressed_data)
-	local nodeids_cnt = ccontent.nodeids_cnt
-	assert(#data == nodeids_cnt * (ccontent.index_bytes+1 + 2),
-		"invalid decompressed data")
 	local p = 1
-	local prev_index = 0
-	for i = 1,nodeids_cnt do
-		local v = prev_index
-		for f = ccontent.index_bytes, 0, -1 do
-			v = v + 2^(8*f) * data:byte(p)
-			p = p+1
+	-- get indices
+	for i = 1,#cnt_names do
+		local cnt = ccontent[cnt_names[i]]
+		if cnt then
+			local indices = {}
+			local prev_index = 0
+			for i = 1,cnt do
+				local v = prev_index
+				for f = ccontent.index_bytes, 0, -1 do
+					v = v + 2^(8*f) * data:byte(p)
+					p = p+1
+				end
+				indices[i] = v
+				prev_index = v
+			end
+			result[indic_names[i]] = indices
 		end
-		indices[i] = v
-		prev_index = v
 	end
-	for i = 1,nodeids_cnt do
-		nodeids[i] = data:byte(p) * 0x100 + data:byte(p+1)
-		p = p + 2
+	-- get nodeids
+	if ccontent.nodeids_cnt then
+		local nodeids = {}
+		for i = 1,ccontent.nodeids_cnt do
+			nodeids[i] = data:byte(p) * 0x100 + data:byte(p+1)
+			p = p + 2
+		end
+		result.nodeids = nodeids
 	end
-	--~ print("compression factor: " ..
-		--~ (nodeids_cnt * 9) / #ccontent.compressed_data)
-	return {indices = indices, nodeids = nodeids}
+	-- get param1s and param2s
+	for j = 1,2 do
+		local cnt = ccontent["param" .. j .. "s_cnt"]
+		if cnt then
+			local vs = {}
+			local bytescnt = math.ceil(cnt / 2)
+			for i = 1,bytescnt do
+				local v = data:byte(p)
+				p = p+1
+				vs[2 * i - 1] = math.floor(v / 0x10)
+				if 2 * i <= cnt then
+					vs[2 * i] = v % 0x10
+				end
+			end
+			result["param" .. j .. "s"] = vs
+		end
+	end
+	-- get metaens strings
+	if ccontent.metaens_cnt then
+		result.metastrings = minetest.deserialize(data:sub(p))
+	end
+	return result
 end
 
 local we_set = worldedit.set
-local my_we_set = function(pos1, pos2, ...)
+local function my_we_set(pos1, pos2, ...)
 	assert(command_invoker, "Player not known")
 	pos1, pos2 = worldedit.sort_pos(pos1, pos2)
 	-- FIXME: Protection support isn't needed
@@ -434,13 +487,13 @@ local my_we_set = function(pos1, pos2, ...)
 	local index_bytes = math.ceil(math.log(worldedit.volume(pos1, pos2)) /
 		math.log(8))
 	local compressed_data = compress_nodedata{
-		indices = indices,
+		indices_n = indices,
 		nodeids = nodeids,
 		index_bytes = index_bytes,
 	}
 	add_to_history({
 		type = "nodeids",
-		mem_use = 9 * (2 * 7 + #compressed_data),
+		mem_use = 9 * (2 * 7) + #compressed_data,
 		pos1 = pos1,
 		pos2 = pos2,
 		count = #nodeids,
@@ -448,7 +501,6 @@ local my_we_set = function(pos1, pos2, ...)
 		compressed_data = compressed_data
 	}, command_invoker)
 	-- Note: param1, param2 and metadata are not changed by worldedit.set
-
 	return rv
 end
 override_cc_with_confirm("/set",
@@ -471,7 +523,7 @@ undo_funcs.nodeids = function(name, data)
 		nodeids_cnt = data.count,
 		index_bytes = data.index_bytes
 	}
-	local indices = decompressed_data.indices
+	local indices = decompressed_data.indices_n
 	local nodeids = decompressed_data.nodeids
 
 	local manip = minetest.get_voxel_manip()
@@ -495,10 +547,11 @@ undo_funcs.nodeids = function(name, data)
 	manip:write_to_map()
 
 	data.compressed_data = compress_nodedata{
-		indices = indices,
+		indices_n = indices,
 		nodeids = new_nodeids,
 		index_bytes = data.index_bytes
 	}
+	data.mem_usage = #data.compressed_data
 
 	worldedit.player_notify(name, data.count .. " nodes set")
 end
@@ -506,4 +559,293 @@ undo_info_funcs.nodeids = function(data)
 	return "pos1: " .. minetest.pos_to_string(data.pos1) .. ", pos2: " ..
 		minetest.pos_to_string(data.pos2) .. ", " .. data.count ..
 		" nodes changed"
+end
+
+
+-- tells if the metadata is that dummy
+local function is_meta_empty(metatabl)
+	for _, inventory in pairs(metatabl.inventory) do
+		if next(inventory) then
+			return false
+		end
+	end
+	for k in pairs(metatabl) do
+		if k ~= "inventory" then
+			return false
+		end
+	end
+	return true
+end
+
+local we_deserialize = worldedit.deserialize
+local function my_we_deserialize(pos, ...)
+	-- remember the previous nodes and meta
+	local nodes = {}
+	local metaens = {}
+	local removed_metaps = {}
+	local add_node = minetest.add_node
+	local get_meta = minetest.get_meta
+	function minetest.add_node(entry)
+		local current_node = minetest.get_node(entry)
+		local have_changes = 3
+		if current_node.name == entry.name then
+			current_node.name = nil
+			have_changes = 2
+		end
+		if current_node.param1 == (entry.param1 or 0) then
+			current_node.param1 = nil
+			have_changes = have_changes-1
+		end
+		if current_node.param2 == (entry.param2 or 0) then
+			current_node.param2 = nil
+			have_changes = have_changes-1
+		end
+		if have_changes == 0 then
+			return
+		end
+		local pos = {x=entry.x, y=entry.y, z=entry.z}
+		nodes[#nodes+1] = {pos, current_node}
+		-- add_node removes meta, save it here
+		local metat = get_meta(pos):to_table()
+		if not is_meta_empty(metat) then
+			metaens[#metaens+1] = {pos, metat}
+			removed_metaps[minetest.hash_node_position(pos)] = #metaens
+		end
+		return add_node(pos, entry)
+	end
+
+	local current_pos
+	local function fakemeta_from_table(_, metat)
+		if is_meta_empty(metat) then
+			-- FIXME Setting an empty meta does the same as setting no meta here
+			return
+		end
+		local meta = get_meta(current_pos)
+		local current_metat = meta:to_table()
+		if is_meta_empty(current_metat) then
+			-- do not save a dummy table
+			current_metat = nil
+		elseif minetest.serialize(metat) == minetest.serialize(current_metat)
+		then
+			-- the new meta and old one are apparently the same (untested)
+			return
+		end
+		meta:from_table(metat)
+		-- save the previous meta if it's not already saved by node removal
+		if not removed_metaps[minetest.hash_node_position(current_pos)] then
+			metaens[#metaens+1] = {current_pos, current_metat}
+		end
+	end
+	function minetest.get_meta(pos)
+		current_pos = pos
+		return {from_table = fakemeta_from_table}
+	end
+
+	local count = we_deserialize(pos, ...)
+
+	minetest.add_node = add_node
+	minetest.get_meta = get_meta
+
+	if #nodes == 0
+	and #metaens == 0 then
+		-- nothing happened
+		return count
+	end
+
+	-- add nodes, param1, param2 and meta changes to history
+	-- get pos1 and pos2
+	local minp = vector.new((nodes[1] or metaens[1])[1])
+	local maxp = vector.new(minp)
+	for i = 1,#nodes do
+		local pos = nodes[i][1]
+		for c,v in pairs(pos) do
+			if v > maxp[c] then
+				maxp[c] = v
+			elseif v < minp[c] then
+				minp[c] = v
+			end
+		end
+	end
+	for i = 1,#metaens do
+		local pos = metaens[i][1]
+		for c,v in pairs(pos) do
+			if v > maxp[c] then
+				maxp[c] = v
+			elseif v < minp[c] then
+				minp[c] = v
+			end
+		end
+	end
+
+	-- order nodes, param1s, param2s and metaens
+	local ystride = maxp.x - minp.x + 1
+	local zstride = (maxp.y - minp.y + 1) * ystride
+	for i = 1,#nodes do
+		local rpos = vector.subtract(nodes[i][1], minp)
+		nodes[i][1] = rpos.z * zstride + rpos.y * ystride + rpos.x
+	end
+	table.sort(nodes, function(a, b)
+		return a[1] < b[1]
+	end)
+	local indices_n = {}
+	local indices_p1 = {}
+	local indices_p2 = {}
+	local nodeids = {}
+	local param1s = {}
+	local param2s = {}
+	for i = 1,#nodes do
+		local v = nodes[i][2]
+		local id = nodes[i].name and minetest.get_content_id(nodes[id].name)
+		if id then
+			indices_n[#indices_n+1] = nodes[i][1]
+			nodeids[#nodeids+1] = id
+		end
+		if v.param1 then
+			indices_p1[#indices_p1+1] = nodes[i][1]
+			param1s[#param1s+1] = v.param1
+		end
+		if v.param2 then
+			indices_p2[#indices_p2+1] = nodes[i][1]
+			param2s[#param2s+1] = v.param2
+		end
+	end
+
+	for i = 1,#metaens do
+		local rpos = vector.subtract(metaens[i][1], minp)
+		metaens[i][1] = rpos.z * zstride + rpos.y * ystride + rpos.x
+	end
+	table.sort(metaens, function(a, b)
+		return a[1] < b[1]
+	end)
+	local indices_m = {}
+	local metastrings = {}
+	for i = 1,#metaens do
+		indices_m[i] = metaens[i][1]
+		metastrings[i] = minetest.serialize(metaens[i][2])
+	end
+
+	-- compress the data and add it to history
+	local index_bytes = math.ceil(math.log(worldedit.volume(minp, maxp)) /
+		math.log(8))
+	local compressed_data = compress_nodedata{
+		indices_n = indices_n,
+		indices_p1 = indices_p1,
+		indices_p2 = indices_p2,
+		indices_m = indices_m,
+		nodeids = nodeids,
+		param1s = param1s,
+		param2s = param2s,
+		metastrings = metastrings,
+		index_bytes = index_bytes,
+	}
+	add_to_history({
+		type = "nodes",
+		mem_use = 9 * (2 * 7) + #compressed_data,
+		pos1 = minp,
+		pos2 = maxp,
+		count_n = #nodeids,
+		count_p1 = #param1s,
+		count_p2 = #param2s,
+		count_m = #metastrings,
+		index_bytes = index_bytes,
+		compressed_data = compressed_data
+	}, command_invoker)
+
+	return count
+end
+override_cc_with_confirm("/load",
+	function()
+		worldedit.deserialize = my_we_deserialize
+	end,
+	function()
+		worldedit.deserialize = we_deserialize
+	end
+)
+
+undo_funcs.nodes = function(name, data)
+	local pos1 = data.pos1
+	local pos2 = data.pos2
+	local ylen = pos2.y - pos1.y + 1
+	local ystride = pos2.x - pos1.x + 1
+
+	local decompressed_data = decompress_nodedata{
+		compressed_data = data.compressed_data,
+		nodeids_cnt = data.count_n,
+		param1s_cnt = data.count_p1,
+		param2s_cnt = data.count_p2,
+		metaens_cnt = data.count_m,
+		index_bytes = data.index_bytes
+	}
+	local indices_n = decompressed_data.indices_n
+	local indices_p1 = decompressed_data.indices_p1
+	local indices_p2 = decompressed_data.indices_p2
+	local nodeids = decompressed_data.nodeids
+	local param1s = decompressed_data.param1s
+	local param2s = decompressed_data.param2s
+
+	-- swap the nodes, param1s and param2s in the world and history data
+	local manip = minetest.get_voxel_manip()
+	local e1, e2 = manip:read_from_map(pos1, pos2)
+	local area = VoxelArea:new{MinEdge=e1, MaxEdge=e2}
+	m_nodes = manip:get_data()
+	m_param1s = manip:get_light_data()
+	m_param2s = manip:get_param2_data()
+
+	local mts = {m_nodes, m_param1s, m_param2s}
+	local indiceses = {indices_n, indices_p1, indices_p2}
+	local contentses = {nodeids, param1s, param2s}
+	for i = 1,3 do
+		local mt = mts[i]
+		local indices = indiceses[i]
+		local contents = contentses[i]
+		for k = 1,#indices do
+			local i = indices[k]
+			local x = i % ystride
+			local y = math.floor(i / ystride) % ylen
+			local z = math.floor(i / (ystride * ylen))
+			local vi = area:index(pos1.x + x, pos1.y + y, pos1.z + z)
+			contents[k], mt[vi] = mt[vi], contents[k]
+		end
+	end
+
+	manip:set_data(m_nodes)
+	manip:set_light_data(m_param1s)
+	manip:set_param2_data(m_param2s)
+	manip:write_to_map()
+
+	-- swap metaens strings
+	local indices_m = decompressed_data.indices_m
+	local metastrings = decompressed_data.metastrings
+	for k = 1,#indices_m do
+		local i = indices_m[k]
+		local meta = minetest.get_meta{
+			x = i % ystride,
+			y = math.floor(i / ystride) % ylen,
+			z = math.floor(i / (ystride * ylen))
+		}
+		local metat = meta:to_table()
+		if is_meta_empty(metat) then
+			metat = nil
+		end
+		meta:from_table(minetest.deserialize(metastrings[i]))
+		metastrings[i] = minetest.serialize(metat)
+	end
+
+	-- update history entry
+	data.compressed_data = compress_nodedata{
+		indices_n = indices_n,
+		indices_p1 = indices_p1,
+		indices_p2 = indices_p2,
+		indices_m = indices_m,
+		nodeids = nodeids,
+		param1s = param1s,
+		param2s = param2s,
+		metastrings = metastrings,
+		index_bytes = data.index_bytes,
+	}
+	data.mem_usage = #data.compressed_data
+
+	worldedit.player_notify(name, data.count_n .. " nodes set, " ..
+		data.count_p1 .. " param1s set, " .. data.count_p2 ..
+		" param2s set and " .. #indices_m .. "")
 end
