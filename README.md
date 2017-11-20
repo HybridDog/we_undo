@@ -11,12 +11,14 @@ Supported chatcommands:
 * /pos2
 * /p
 * /set
+* /load (untested)
 * /y
 * /n
 
 Ignored chatcommands:
 * /fixlight
 * /volume
+* /save
 
 
 TODO:
