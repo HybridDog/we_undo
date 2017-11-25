@@ -5,6 +5,7 @@
 local max_commands = 256
 local min_commands = 3
 local max_memory_usage = 2^25 -- 32 MiB
+local remember_innocuous = true
 
 
 ----------------- Journal and chatcommands -------------------------------------
@@ -221,70 +222,74 @@ minetest.register_chatcommand("/show_journal", {
 
 ----------------- The worldedit stuff ------------------------------------------
 
-override_chatcommand("/pos1",
-	function()
-		add_to_history{
-			type = "marker",
-			mem_use = 9 * 7,
-			id = 1,
-			pos = worldedit.pos1[command_invoker]
-		}
-	end
-)
+if remember_innocuous then
 
-override_chatcommand("/pos2",
-	function()
-		add_to_history{
-			type = "marker",
-			mem_use = 9 * 7,
-			id = 2,
-			pos = worldedit.pos2[command_invoker]
-		}
-	end
-)
+	override_chatcommand("/pos1",
+		function()
+			add_to_history{
+				type = "marker",
+				mem_use = 9 * 7,
+				id = 1,
+				pos = worldedit.pos1[command_invoker]
+			}
+		end
+	)
 
--- Punch before the /p command's punch
-table.insert(minetest.registered_on_punchnodes, 1, function(_,_, player)
-	local name = player:get_player_name()
-	local typ = worldedit.set_pos[name]
-	if typ == "pos1"
-	or typ == "pos1only" then
-		add_to_history({
-			type = "marker",
-			mem_use = 9 * 7,
-			id = 1,
-			pos = worldedit.pos1[name]
-		}, name)
-	elseif typ == "pos2" then
-		add_to_history({
-			type = "marker",
-			mem_use = 9 * 7,
-			id = 2,
-			pos = worldedit.pos2[name]
-		}, name)
-	end
-end)
+	override_chatcommand("/pos2",
+		function()
+			add_to_history{
+				type = "marker",
+				mem_use = 9 * 7,
+				id = 2,
+				pos = worldedit.pos2[command_invoker]
+			}
+		end
+	)
 
-undo_funcs.marker = function(name, data)
-	local pos = data.pos
-	local i = "pos" .. data.id
-	local current_pos = worldedit[i][name]
-	worldedit[i][name] = pos
-	worldedit["mark_pos" .. data.id](name)
-	if pos then
-		worldedit.player_notify(name, "position " .. data.id .. " set to " ..
-			minetest.pos_to_string(pos))
-	else
-		worldedit.player_notify(name, "position " .. data.id .. " reset")
+	-- Punch before the /p command's punch
+	table.insert(minetest.registered_on_punchnodes, 1, function(_,_, player)
+		local name = player:get_player_name()
+		local typ = worldedit.set_pos[name]
+		if typ == "pos1"
+		or typ == "pos1only" then
+			add_to_history({
+				type = "marker",
+				mem_use = 9 * 7,
+				id = 1,
+				pos = worldedit.pos1[name]
+			}, name)
+		elseif typ == "pos2" then
+			add_to_history({
+				type = "marker",
+				mem_use = 9 * 7,
+				id = 2,
+				pos = worldedit.pos2[name]
+			}, name)
+		end
+	end)
+
+	undo_funcs.marker = function(name, data)
+		local pos = data.pos
+		local i = "pos" .. data.id
+		local current_pos = worldedit[i][name]
+		worldedit[i][name] = pos
+		worldedit["mark_pos" .. data.id](name)
+		if pos then
+			worldedit.player_notify(name, "position " .. data.id ..
+				" set to " .. minetest.pos_to_string(pos))
+		else
+			worldedit.player_notify(name, "position " .. data.id .. " reset")
+		end
+		data.pos = current_pos
 	end
-	data.pos = current_pos
-end
-undo_info_funcs.marker = function(data)
-	if not data.pos then
-		return "Set pos" .. data.id
+	undo_info_funcs.marker = function(data)
+		if not data.pos then
+			return "Set pos" .. data.id
+		end
+		return "changed pos" .. data.id .. ", previous value: " ..
+			minetest.pos_to_string(data.pos)
 	end
-	return "changed pos" .. data.id .. ", previous value: " ..
-		minetest.pos_to_string(data.pos)
+
 end
 
 

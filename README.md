@@ -22,6 +22,7 @@ Ignored chatcommands:
 
 
 TODO:
+* simplify mem_usage
 * Setting for disabling storing harmless things like pos changes
 * Add parameters to undo and redo: undo the last n
 * Allow undoing changes which happened before other changes (considered unsafe)
