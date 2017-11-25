@@ -373,15 +373,13 @@ local function compress_nodedata(nodedata)
 				) .. string.char(nodedata.nodeids[i] % 0x100)
 		end
 	end
-	-- param1 and param2 are 4 bit values
+	-- param1 and param2 are 8 bit values
 	for j = 1,2 do
 		if nodedata["indices_p" .. j] then
 			local vs = nodedata["param" .. j .. "s"]
-			local bytescnt = math.ceil(#vs / 2)
-			for i = 1,bytescnt do
-				-- put two values in one byte
-				local v = vs[2 * i - 1] * 0x10 + (vs[2 * i] or 0)
-				data[#data+1] = string.char(v)
+			local p = #data
+			for i = 1,#vs do
+				data[p+1] = string.char(vs[i])
 			end
 		end
 	end
@@ -429,14 +427,9 @@ local function decompress_nodedata(ccontent)
 		local cnt = ccontent["param" .. j .. "s_cnt"]
 		if cnt then
 			local vs = {}
-			local bytescnt = math.ceil(cnt / 2)
-			for i = 1,bytescnt do
-				local v = data:byte(p)
+			for i = 1,cnt do
+				vs[i] = data:byte(p)
 				p = p+1
-				vs[2 * i - 1] = math.floor(v / 0x10)
-				if 2 * i <= cnt then
-					vs[2 * i] = v % 0x10
-				end
 			end
 			result["param" .. j .. "s"] = vs
 		end
@@ -564,17 +557,30 @@ end
 
 -- tells if the metadata is that dummy
 local function is_meta_empty(metatabl)
-	for _, inventory in pairs(metatabl.inventory) do
-		if next(inventory) then
-			return false
-		end
+	if metatabl.inventory
+	and next(metatabl.inventory) ~= nil then
+		return false
+	end
+	if metatabl.fields
+	and next(metatabl.fields) ~= nil then
+		return false
 	end
 	for k in pairs(metatabl) do
-		if k ~= "inventory" then
+		if k ~= "inventory"
+		and k ~= "fields" then
 			return false
 		end
 	end
 	return true
+end
+
+-- copied from we to get the same meta format
+local function make_meta_serializable(metat)
+	for _, inventory in pairs(metat.inventory) do
+		for index, stack in ipairs(inventory) do
+			inventory[index] = stack.to_string and stack:to_string() or stack
+		end
+	end
 end
 
 local we_deserialize = worldedit.deserialize
@@ -582,17 +588,21 @@ local function my_we_deserialize(pos, ...)
 	-- remember the previous nodes and meta
 	local nodes = {}
 	local metaens = {}
-	local removed_metaps = {}
 	local add_node = minetest.add_node
-	local get_meta = minetest.get_meta
-	function minetest.add_node(entry)
+	local function my_add_node(entry)
 		local current_node = minetest.get_node(entry)
 		local have_changes = 3
+		local def_ent = minetest.registered_nodes[entry.name]
+		local def_cur = minetest.registered_nodes[current_node.name]
 		if current_node.name == entry.name then
 			current_node.name = nil
 			have_changes = 2
 		end
-		if current_node.param1 == (entry.param1 or 0) then
+		if current_node.param1 == (entry.param1 or 0)
+		or (def_ent and def_cur  -- don't save volatile light values or param1=0
+			and (def_ent.paramtype == "light" or (entry.param1 or 0) == 0)
+			and (def_cur.paramtype == "light" or current_node.param1 == 0)
+		) then
 			current_node.param1 = nil
 			have_changes = have_changes-1
 		end
@@ -600,51 +610,47 @@ local function my_we_deserialize(pos, ...)
 			current_node.param2 = nil
 			have_changes = have_changes-1
 		end
-		if have_changes == 0 then
+		local pos = {x=entry.x, y=entry.y, z=entry.z}
+		-- we calls add_node always before setting any meta, save it here
+		local metat = minetest.get_meta(pos):to_table()
+		if is_meta_empty(metat) then
+			metat = nil
+		else
+			make_meta_serializable(metat)
+		end
+		local new_metat = entry.meta
+		if new_metat
+		and is_meta_empty(new_metat) then
+			new_metat = nil
+		end
+		local meta_changed = (metat or new_metat)
+			and (not metat or not new_metat
+				or minetest.serialize(metat) ~= minetest.serialize(new_metat)
+			)
+		if meta_changed then
+			metaens[#metaens+1] = {pos, metat}
+		end
+
+		if have_changes > 0 then
+			nodes[#nodes+1] = {pos, current_node}
+		elseif not meta_changed then
+			-- neither nodes, nor meta has changed
 			return
 		end
-		local pos = {x=entry.x, y=entry.y, z=entry.z}
-		nodes[#nodes+1] = {pos, current_node}
-		-- add_node removes meta, save it here
-		local metat = get_meta(pos):to_table()
-		if not is_meta_empty(metat) then
-			metaens[#metaens+1] = {pos, metat}
-			removed_metaps[minetest.hash_node_position(pos)] = #metaens
-		end
-		return add_node(pos, entry)
+
+		-- set the original functions due to on_construct and on_destruct
+		minetest.add_node = add_node
+
+		minetest.add_node(pos, entry)
+
+		minetest.add_node = my_add_node
 	end
 
-	local current_pos
-	local function fakemeta_from_table(_, metat)
-		if is_meta_empty(metat) then
-			-- FIXME Setting an empty meta does the same as setting no meta here
-			return
-		end
-		local meta = get_meta(current_pos)
-		local current_metat = meta:to_table()
-		if is_meta_empty(current_metat) then
-			-- do not save a dummy table
-			current_metat = nil
-		elseif minetest.serialize(metat) == minetest.serialize(current_metat)
-		then
-			-- the new meta and old one are apparently the same (untested)
-			return
-		end
-		meta:from_table(metat)
-		-- save the previous meta if it's not already saved by node removal
-		if not removed_metaps[minetest.hash_node_position(current_pos)] then
-			metaens[#metaens+1] = {current_pos, current_metat}
-		end
-	end
-	function minetest.get_meta(pos)
-		current_pos = pos
-		return {from_table = fakemeta_from_table}
-	end
+	minetest.add_node = my_add_node
 
 	local count = we_deserialize(pos, ...)
 
 	minetest.add_node = add_node
-	minetest.get_meta = get_meta
 
 	if #nodes == 0
 	and #metaens == 0 then
@@ -695,7 +701,7 @@ local function my_we_deserialize(pos, ...)
 	local param2s = {}
 	for i = 1,#nodes do
 		local v = nodes[i][2]
-		local id = nodes[i].name and minetest.get_content_id(nodes[id].name)
+		local id = v.name and minetest.get_content_id(v.name)
 		if id then
 			indices_n[#indices_n+1] = nodes[i][1]
 			nodeids[#nodeids+1] = id
@@ -787,9 +793,9 @@ undo_funcs.nodes = function(name, data)
 	local manip = minetest.get_voxel_manip()
 	local e1, e2 = manip:read_from_map(pos1, pos2)
 	local area = VoxelArea:new{MinEdge=e1, MaxEdge=e2}
-	m_nodes = manip:get_data()
-	m_param1s = manip:get_light_data()
-	m_param2s = manip:get_param2_data()
+	local m_nodes = manip:get_data()
+	local m_param1s = manip:get_light_data()
+	local m_param2s = manip:get_param2_data()
 
 	local mts = {m_nodes, m_param1s, m_param2s}
 	local indiceses = {indices_n, indices_p1, indices_p2}
@@ -818,17 +824,19 @@ undo_funcs.nodes = function(name, data)
 	local metastrings = decompressed_data.metastrings
 	for k = 1,#indices_m do
 		local i = indices_m[k]
-		local meta = minetest.get_meta{
+		local meta = minetest.get_meta(vector.add(pos1, {
 			x = i % ystride,
 			y = math.floor(i / ystride) % ylen,
 			z = math.floor(i / (ystride * ylen))
-		}
+		}))
 		local metat = meta:to_table()
 		if is_meta_empty(metat) then
 			metat = nil
+		else
+			make_meta_serializable(metat)
 		end
-		meta:from_table(minetest.deserialize(metastrings[i]))
-		metastrings[i] = minetest.serialize(metat)
+		meta:from_table(minetest.deserialize(metastrings[k]))
+		metastrings[k] = minetest.serialize(metat)
 	end
 
 	-- update history entry
@@ -847,5 +855,5 @@ undo_funcs.nodes = function(name, data)
 
 	worldedit.player_notify(name, data.count_n .. " nodes set, " ..
 		data.count_p1 .. " param1s set, " .. data.count_p2 ..
-		" param2s set and " .. #indices_m .. "")
+		" param2s set and " .. #indices_m .. " metaens changed")
 end
