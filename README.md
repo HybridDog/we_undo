@@ -28,4 +28,3 @@ TODO:
 * Allow undoing changes which happened before other changes (considered unsafe)
 	e.g. //undo ~1 to undo the change before the latest one
 * Implement more commands
-* Add mod load time info

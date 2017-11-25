@@ -1,3 +1,4 @@
+local load_time_start = minetest.get_us_time()
 
 
 ----------------- Settings -----------------------------------------------------
@@ -866,4 +867,13 @@ undo_funcs.nodes = function(name, data)
 	worldedit.player_notify(name, data.count_n .. " nodes set, " ..
 		data.count_p1 .. " param1s set, " .. data.count_p2 ..
 		" param2s set and " .. #indices_m .. " metaens changed")
+end
+
+
+local time = (minetest.get_us_time() - load_time_start) / 1000000
+local msg = "[we_undo] loaded after ca. " .. time .. " seconds."
+if time > 0.01 then
+	print(msg)
+else
+	minetest.log("info", msg)
 end
