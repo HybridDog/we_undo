@@ -93,6 +93,8 @@ local function add_to_history(data, name)
 		j.entry_count = j.off_start+1
 	end
 	-- insert the new data
+	-- make every entry supposedly have >= 16 bytes
+	data.mem_use = (data.mem_use or 0) + 16
 	j.ring[(j.start + j.off_start) % max_commands] = data
 	j.mem_usage = j.mem_usage + data.mem_use
 
@@ -128,14 +130,18 @@ local function trim_undo_history(j)
 end
 
 local undo_funcs = {}
-local function apply_undo(name)
-	local j = journal[name]
+local function bare_apply_undo(j, name)
 	local i = (j.start + j.off_start) % max_commands
 	local data = j.ring[i]
 	local old_memuse = data.mem_use
 	undo_funcs[data.type](name, data)
-	j.mem_usage = j.mem_usage + data.mem_use - old_memuse
+	j.mem_usage = j.mem_usage + (data.mem_use or 0) + 16 - old_memuse
 	j.ring[i] = data
+end
+
+local function apply_undo(name)
+	local j = journal[name]
+	bare_apply_undo(j, name)
 	j.off_start = j.off_start-1
 	if j.mem_usage > max_memory_usage then
 		trim_undo_history(j)
@@ -145,13 +151,8 @@ end
 local function apply_redo(name)
 	local j = journal[name]
 	j.off_start = j.off_start+1
-	local i = (j.start + j.off_start) % max_commands
-	local data = j.ring[i]
-	local old_memuse = data.mem_use
 	-- undoing an undone undo function is redoing
-	undo_funcs[data.type](name, data)
-	j.mem_usage = j.mem_usage + data.mem_use - old_memuse
-	j.ring[i] = data
+	bare_apply_undo(j, name)
 	if j.mem_usage > max_memory_usage then
 		trim_undo_history(j)
 	end
@@ -223,7 +224,7 @@ minetest.register_chatcommand("/show_journal", {
 })
 
 
------------------ The worldedit stuff ------------------------------------------
+----------------- Harmless worldedit chatcommands ------------------------------
 
 if remember_innocuous then
 
@@ -231,7 +232,6 @@ if remember_innocuous then
 		function()
 			add_to_history{
 				type = "marker",
-				mem_use = 9 * 7,
 				id = 1,
 				pos = worldedit.pos1[command_invoker]
 			}
@@ -242,7 +242,6 @@ if remember_innocuous then
 		function()
 			add_to_history{
 				type = "marker",
-				mem_use = 9 * 7,
 				id = 2,
 				pos = worldedit.pos2[command_invoker]
 			}
@@ -257,14 +256,12 @@ if remember_innocuous then
 		or typ == "pos1only" then
 			add_to_history({
 				type = "marker",
-				mem_use = 9 * 7,
 				id = 1,
 				pos = worldedit.pos1[name]
 			}, name)
 		elseif typ == "pos2" then
 			add_to_history({
 				type = "marker",
-				mem_use = 9 * 7,
 				id = 2,
 				pos = worldedit.pos2[name]
 			}, name)
@@ -295,6 +292,8 @@ if remember_innocuous then
 
 end
 
+
+----------------------- Functions common to other ones -------------------------
 
 -- Catch confirmation requests (/y or /n follows)
 local y_pending = {}
@@ -449,6 +448,9 @@ local function decompress_nodedata(ccontent)
 	return result
 end
 
+
+----------------------- World changing commands --------------------------------
+
 local we_set = worldedit.set
 local function my_we_set(pos1, pos2, ...)
 	assert(command_invoker, "Player not known")
@@ -494,7 +496,7 @@ local function my_we_set(pos1, pos2, ...)
 	}
 	add_to_history({
 		type = "nodeids",
-		mem_use = 9 * (2 * 7) + #compressed_data,
+		mem_use = #compressed_data,
 		pos1 = pos1,
 		pos2 = pos2,
 		count = #nodeids,
@@ -754,7 +756,7 @@ local function my_we_deserialize(pos, ...)
 	}
 	add_to_history({
 		type = "nodes",
-		mem_use = 9 * (2 * 7) + #compressed_data,
+		mem_use = #compressed_data,
 		pos1 = minp,
 		pos2 = maxp,
 		count_n = #nodeids,
