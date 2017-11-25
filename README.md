@@ -2,6 +2,8 @@
 `//redo` redo what was just undone<br/>
 `//show_journal` view what can be undone and redone
 
+The changes of nodes after invoking /set are compressed to improve memory usage.
+
 Related issues:
 * https://github.com/Uberi/Minetest-WorldEdit/issues/43
 * https://forum.minetest.net/viewtopic.php?p=296543#p296543
@@ -23,10 +25,8 @@ Ignored chatcommands:
 
 TODO:
 * simplify mem_usage
-* Setting for disabling storing harmless things like pos changes
 * Add parameters to undo and redo: undo the last n
 * Allow undoing changes which happened before other changes (considered unsafe)
 	e.g. //undo ~1 to undo the change before the latest one
 * Implement more commands
 * Add mod load time info
-* Add settingtypes.txt for the settings

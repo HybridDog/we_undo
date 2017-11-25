@@ -2,10 +2,13 @@
 
 ----------------- Settings -----------------------------------------------------
 
-local max_commands = 256
-local min_commands = 3
-local max_memory_usage = 2^25 -- 32 MiB
-local remember_innocuous = true
+local remember_innocuous =
+	minetest.settings:get_bool"we_undo.remember_innocuous" ~= false
+local max_commands = tonumber(
+	minetest.settings:get"we_undo.max_commands") or 256
+local min_commands = tonumber(minetest.settings:get"we_undo.min_commands") or 3
+local max_memory_usage = tonumber(
+	minetest.settings:get"we_undo.max_memory_usage") or 2^25
 
 
 ----------------- Journal and chatcommands -------------------------------------
