@@ -510,39 +510,6 @@ local function we_nodeset_wrapper(func, pos1, pos2, ...)
 	-- similar functions
 end
 
-local we_set = worldedit.set
-local function my_we_set(pos1, pos2, ...)
-	return we_nodeset_wrapper(we_set, pos1, pos2, ...)
-end
-local set_cmds = {"/set", "/mix"}
-for i = 1,2 do
-	override_cc_with_confirm(set_cmds[i],
-		function()
-			worldedit.set = my_we_set
-		end,
-		function()
-			worldedit.set = we_set
-		end
-	)
-end
-
-local we_replace = worldedit.replace
-local function my_we_replace(pos1, pos2, ...)
-	return we_nodeset_wrapper(we_replace, pos1, pos2, ...)
-end
--- both commands share the same function
-local replace_cmds = {"/replace", "/replaceinverse"}
-for i = 1,2 do
-	override_cc_with_confirm(replace_cmds[i],
-		function()
-			worldedit.replace = my_we_replace
-		end,
-		function()
-			worldedit.replace = we_replace
-		end
-	)
-end
-
 undo_funcs.nodeids = function(name, data)
 	local pos1 = data.pos1
 	local pos2 = data.pos2
@@ -590,6 +557,62 @@ undo_info_funcs.nodeids = function(data)
 	return "pos1: " .. minetest.pos_to_string(data.pos1) .. ", pos2: " ..
 		minetest.pos_to_string(data.pos2) .. ", " .. data.count ..
 		" nodes changed"
+end
+
+local we_set = worldedit.set
+local function my_we_set(pos1, pos2, ...)
+	return we_nodeset_wrapper(we_set, pos1, pos2, ...)
+end
+local set_cmds = {"/set", "/mix"}
+for i = 1,2 do
+	override_cc_with_confirm(set_cmds[i],
+		function()
+			worldedit.set = my_we_set
+		end,
+		function()
+			worldedit.set = we_set
+		end
+	)
+end
+
+local we_replace = worldedit.replace
+local function my_we_replace(pos1, pos2, ...)
+	return we_nodeset_wrapper(we_replace, pos1, pos2, ...)
+end
+-- both commands share the same function
+local replace_cmds = {"/replace", "/replaceinverse"}
+for i = 1,2 do
+	override_cc_with_confirm(replace_cmds[i],
+		function()
+			worldedit.replace = my_we_replace
+		end,
+		function()
+			worldedit.replace = we_replace
+		end
+	)
+end
+
+local we_sphere = worldedit.sphere
+local function sph_func(_,_, ...)
+	return we_sphere(...)
+end
+local function my_we_sphere(pos, radius, ...)
+	local r = math.ceil(radius)
+	local pos1 = vector.subtract(pos, r)
+	local pos2 = vector.add(pos, r)
+
+	return we_nodeset_wrapper(sph_func, pos1, pos2, pos, radius, ...)
+end
+local sphere_cmds = {"/sphere", "/hollowsphere"}
+for i = 1,2 do
+	override_cc_with_confirm(sphere_cmds[i],
+		function()
+			worldedit.sphere = my_we_sphere
+		end,
+		function()
+			worldedit.sphere = we_sphere
+		end
+	)
 end
 
 
