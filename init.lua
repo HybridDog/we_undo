@@ -514,14 +514,17 @@ local we_set = worldedit.set
 local function my_we_set(pos1, pos2, ...)
 	return we_nodeset_wrapper(we_set, pos1, pos2, ...)
 end
-override_cc_with_confirm("/set",
-	function()
-		worldedit.set = my_we_set
-	end,
-	function()
-		worldedit.set = we_set
-	end
-)
+local set_cmds = {"/set", "/mix"}
+for i = 1,2 do
+	override_cc_with_confirm(set_cmds[i],
+		function()
+			worldedit.set = my_we_set
+		end,
+		function()
+			worldedit.set = we_set
+		end
+	)
+end
 
 local we_replace = worldedit.replace
 local function my_we_replace(pos1, pos2, ...)
