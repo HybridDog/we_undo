@@ -9,22 +9,71 @@ Related issues:
 * https://forum.minetest.net/viewtopic.php?p=296543#p296543
 
 Supported chatcommands:
-* /pos1
-* /pos2
+* /pos1 and /1
+* /pos2 and /2
 * /p
-* /set
+* /set and /s
+* /replace and /r
+* /replaceinverse and /ri
 * /load
 * /y
 * /n
 
 Ignored chatcommands:
+* /lua
+* /luatransform
+* /clearobjects
 * /fixlight
-* /volume
 * /save
+* /mtschemcreate
+* /mtschemprob
+* /inspect /i
+* /mark /mk
+* /unmark /umk
+* /volume and /v
+* /about
+
+Not yet implemented:
+* /fixedpos /fp
+* /reset /rst
+* /shift
+* /expand
+* /contract
+* /outset
+* /inset
+* /mix
+* /hollowsphere /hspr
+* /sphere /spr
+* /hollowdome /hdo
+* /dome /do
+* /hollowcylinder /hcyl
+* /cylinder /cyl
+* /hollowpyramid /hpyr
+* /pyramid /pyr
+* /spiral
+* /copy
+* /move
+* /stack
+* /stack2
+* /scale
+* /transpose
+* /flip
+* /rotate
+* /orient
+* /drain
+* /hide
+* /suppress
+* /highlight
+* /restore
+* /allocate
+* /mtschemplace
+* /deleteblocks
+
 
 
 TODO:
 * Add parameters to undo and redo: undo the last n
 * Allow undoing changes which happened before other changes (considered unsafe)
 	e.g. //undo ~1 to undo the change before the latest one
+* Add times to the changes, show in //show_journal
 * Implement more commands

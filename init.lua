@@ -12,7 +12,7 @@ local max_memory_usage = tonumber(
 	minetest.settings:get"we_undo.max_memory_usage") or 2^25
 
 
------------------ Journal and chatcommands -------------------------------------
+----------------- Journal and we_undo chatcommands -----------------------------
 
 local command_invoker
 
@@ -229,6 +229,7 @@ minetest.register_chatcommand("/show_journal", {
 
 if remember_innocuous then
 
+	-- short commands (/1 in this case) are automatically supported
 	override_chatcommand("/pos1",
 		function()
 			add_to_history{
@@ -452,8 +453,7 @@ end
 
 ----------------------- World changing commands --------------------------------
 
-local we_set = worldedit.set
-local function my_we_set(pos1, pos2, ...)
+local function we_nodeset_wrapper(func, pos1, pos2, ...)
 	assert(command_invoker, "Player not known")
 	pos1, pos2 = worldedit.sort_pos(pos1, pos2)
 	-- FIXME: Protection support isn't needed
@@ -464,7 +464,7 @@ local function my_we_set(pos1, pos2, ...)
 	local data_before = manip:get_data()
 
 	we_data = nil
-	local rv = we_set(pos1, pos2, ...)
+	local rv = func(pos1, pos2, ...)
 
 	local ystride = pos2.x - pos1.x + 1
 	local zstride = (pos2.y - pos1.y + 1) * ystride
@@ -504,8 +504,15 @@ local function my_we_set(pos1, pos2, ...)
 		index_bytes = index_bytes,
 		compressed_data = compressed_data
 	}, command_invoker)
-	-- Note: param1, param2 and metadata are not changed by worldedit.set
+
 	return rv
+	-- Note: param1, param2 and metadata are not changed by worldedit.set and
+	-- similar functions
+end
+
+local we_set = worldedit.set
+local function my_we_set(pos1, pos2, ...)
+	return we_nodeset_wrapper(we_set, pos1, pos2, ...)
 end
 override_cc_with_confirm("/set",
 	function()
@@ -515,6 +522,23 @@ override_cc_with_confirm("/set",
 		worldedit.set = we_set
 	end
 )
+
+local we_replace = worldedit.replace
+local function my_we_replace(pos1, pos2, ...)
+	return we_nodeset_wrapper(we_replace, pos1, pos2, ...)
+end
+-- both commands share the same function
+local replace_cmds = {"/replace", "/replaceinverse"}
+for i = 1,2 do
+	override_cc_with_confirm(replace_cmds[i],
+		function()
+			worldedit.replace = my_we_replace
+		end,
+		function()
+			worldedit.replace = we_replace
+		end
+	)
+end
 
 undo_funcs.nodeids = function(name, data)
 	local pos1 = data.pos1
