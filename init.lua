@@ -615,6 +615,37 @@ for i = 1,2 do
 	)
 end
 
+local we_dome = worldedit.dome
+local function dome_func(_,_, ...)
+	return we_dome(...)
+end
+local function my_we_dome(pos, radius, ...)
+	local r = math.ceil(radius)
+	local pos1 = vector.subtract(pos, r)
+	local pos2 = vector.add(pos, r)
+
+	-- dome with negative radius looks different, I couldn't test it because
+	-- //dome does not accept negative radii.
+	assert(radius >= 0)
+
+	-- a dome is a semi shpere, thus it's almost the same as sphere:
+	-- below pos.y no nodes are set.
+	pos1.y = pos.y
+
+	return we_nodeset_wrapper(dome_func, pos1, pos2, pos, radius, ...)
+end
+local dome_cmds = {"/dome", "/hollowdome"}
+for i = 1,2 do
+	override_cc_with_confirm(dome_cmds[i],
+		function()
+			worldedit.dome = my_we_dome
+		end,
+		function()
+			worldedit.dome = we_dome
+		end
+	)
+end
+
 
 -- tells if the metadata is that dummy
 local function is_meta_empty(metatabl)
