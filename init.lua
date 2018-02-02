@@ -625,7 +625,7 @@ local function my_we_dome(pos, radius, ...)
 	local pos2 = vector.add(pos, r)
 
 	-- dome with negative radius looks different, I couldn't test it because
-	-- //dome does not accept negative radii.
+	-- //dome does not accept negative radii. FIXME
 	assert(radius >= 0)
 
 	-- a dome is a semi shpere, thus it's almost the same as sphere:
@@ -642,6 +642,41 @@ for i = 1,2 do
 		end,
 		function()
 			worldedit.dome = we_dome
+		end
+	)
+end
+
+local we_cylinder = worldedit.cylinder
+local function cylinder_func(_,_, ...)
+	return we_cylinder(...)
+end
+local function my_we_cylinder(pos, axis, length, radius, ...)
+	local r = math.ceil(radius)
+	local pos1 = vector.subtract(pos, r)
+	local pos2 = vector.add(pos, r)
+
+	assert(radius >= 0)
+
+	pos1[axis] = pos[axis]
+	pos2[axis] = pos[axis] + length - 1
+	if length < 0 then
+		pos1[axis], pos2[axis] = pos2[axis], pos1[axis]
+		-- with negative length, the cylinder is shifted one node FIXME
+		pos1[axis] = pos1[axis]-1
+		pos2[axis] = pos2[axis]-1
+	end
+
+	return we_nodeset_wrapper(cylinder_func, pos1, pos2, pos, axis, length,
+		radius, ...)
+end
+local cylinder_cmds = {"/cylinder", "/hollowcylinder"}
+for i = 1,2 do
+	override_cc_with_confirm(cylinder_cmds[i],
+		function()
+			worldedit.cylinder = my_we_cylinder
+		end,
+		function()
+			worldedit.cylinder = we_cylinder
 		end
 	)
 end

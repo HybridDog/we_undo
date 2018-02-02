@@ -19,6 +19,8 @@ Supported chatcommands:
 * /hollowsphere and /hspr
 * /dome and /do
 * /hollowdome and /hdo
+* /cylinder and /cyl
+* /hollowcylinder and /hcyl
 * /load
 * /y
 * /n
@@ -46,8 +48,6 @@ Not yet implemented:
 * /outset
 * /inset
 * /mix
-* /hollowcylinder /hcyl
-* /cylinder /cyl
 * /hollowpyramid /hpyr
 * /pyramid /pyr
 * /spiral
