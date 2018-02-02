@@ -13,6 +13,7 @@ Supported chatcommands:
 * /pos2 and /2
 * /p
 * /set and /s
+* /mix
 * /replace and /r
 * /replaceinverse and /ri
 * /sphere and /spr
@@ -47,7 +48,6 @@ Not yet implemented:
 * /contract
 * /outset
 * /inset
-* /mix
 * /hollowpyramid /hpyr
 * /pyramid /pyr
 * /spiral
