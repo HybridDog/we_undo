@@ -24,6 +24,7 @@ Supported chatcommands:
 * /hollowcylinder and /hcyl
 * /pyramid and /pyr
 * /hollowpyramid and /hpyr
+* /spiral
 * /load
 * /y
 * /n
@@ -50,7 +51,6 @@ Not yet implemented:
 * /contract
 * /outset
 * /inset
-* /spiral
 * /copy
 * /move
 * /stack
@@ -78,3 +78,4 @@ TODO:
 * Add times to the changes, show in //show_journal
 * Implement more commands
 * worldedit pyramid fix
+* Fix the shown "nodes changed" count

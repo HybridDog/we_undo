@@ -18,6 +18,7 @@ local command_invoker
 
 local function override_chatcommand(cname, func_before, func_after)
 	local command = minetest.registered_chatcommands[cname]
+	assert(command, "Chatcommand " .. cname .. " isn't registered.")
 	-- save the name of the player and execute func_before if present
 	if func_before then
 		local func = command.func
@@ -714,6 +715,32 @@ for i = 1,2 do
 		end
 	)
 end
+
+local we_spiral = worldedit.spiral
+local function spiral_func(_,_, ...)
+	return we_spiral(...)
+end
+local function my_we_spiral(pos, length, height, spacer, ...)
+	-- FIXME adding the spacer to the extent makes it work
+	local extent = math.ceil(length / 2) + spacer
+
+	local pos1 = vector.subtract(pos, extent)
+	local pos2 = vector.add(pos, extent)
+
+	pos1.y = pos.y
+	pos2.y = pos.y + math.ceil(height) - 1
+
+	return we_nodeset_wrapper(spiral_func, pos1, pos2, pos, length, height,
+		spacer, ...)
+end
+override_cc_with_confirm("/spiral",
+	function()
+		worldedit.spiral = my_we_spiral
+	end,
+	function()
+		worldedit.spiral = we_spiral
+	end
+)
 
 
 -- tells if the metadata is that dummy
