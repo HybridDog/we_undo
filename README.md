@@ -22,6 +22,8 @@ Supported chatcommands:
 * /hollowdome and /hdo
 * /cylinder and /cyl
 * /hollowcylinder and /hcyl
+* /pyramid and /pyr
+* /hollowpyramid and /hpyr
 * /load
 * /y
 * /n
@@ -48,8 +50,6 @@ Not yet implemented:
 * /contract
 * /outset
 * /inset
-* /hollowpyramid /hpyr
-* /pyramid /pyr
 * /spiral
 * /copy
 * /move
@@ -77,3 +77,4 @@ TODO:
 	e.g. //undo ~1 to undo the change before the latest one
 * Add times to the changes, show in //show_journal
 * Implement more commands
+* worldedit pyramid fix
