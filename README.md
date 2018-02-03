@@ -51,6 +51,7 @@ Not yet implemented:
 * /contract
 * /outset
 * /inset
+* /cube /hollowcube
 * /copy
 * /move
 * /stack

@@ -688,19 +688,14 @@ local function pyramid_func(_,_, ...)
 end
 local function my_we_pyramid(pos, axis, height, ...)
 	local h = math.ceil(math.abs(height))
-	-- This code is commented because of a worldedit pyramid wrapping bug. FIXME
-	--~ local pos1 = vector.subtract(pos, h-1)
-	--~ local pos2 = vector.add(pos, h-1)
+	local pos1 = vector.subtract(pos, h-1)
+	local pos2 = vector.add(pos, h-1)
 
-	--~ if height > 0 then
-		--~ pos1[axis] = pos[axis]
-	--~ else
-		--~ pos2[axis] = pos[axis]
-	--~ end
-
-	-- This workaround doesn't necessarily work right. It worked when tested.
-	local pos1 = vector.subtract(pos, h + 15)
-	local pos2 = vector.add(pos, h + 15)
+	if height > 0 then
+		pos1[axis] = pos[axis]
+	else
+		pos2[axis] = pos[axis]
+	end
 
 	return we_nodeset_wrapper(pyramid_func, pos1, pos2, pos, axis, height, ...)
 end
