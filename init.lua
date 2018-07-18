@@ -18,7 +18,14 @@ local command_invoker
 
 local function override_chatcommand(cname, func_before, func_after)
 	local command = minetest.registered_chatcommands[cname]
-	assert(command, "Chatcommand " .. cname .. " isn't registered.")
+	if not command then
+		local cmds = {}
+		for name in pairs(minetest.registered_chatcommands) do
+			cmds[#cmds+1] = name
+		end
+		error("Chatcommand " .. cname .. " is not registered.\n" ..
+			"Available commands: " .. table.concat(cmds, ", "))
+	end
 	-- save the name of the player and execute func_before if present
 	if func_before then
 		local func = command.func
