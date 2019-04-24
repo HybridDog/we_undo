@@ -764,13 +764,23 @@ local function is_meta_empty(metatabl)
 	return true
 end
 
--- copied from we to get the same meta format
-local function make_meta_serializable(metat)
+-- Gets information about meta if it is set, otherwise returns nil
+-- the format of the information is the same as in WorldEdit
+local function get_meta_serializable(pos)
+	if not minetest.find_nodes_with_meta(pos, pos) then
+		return
+	end
+	local meta = minetest.get_meta(pos)
+	local metat = meta:to_table()
 	for _, inventory in pairs(metat.inventory) do
-		for index, stack in ipairs(inventory) do
-			inventory[index] = stack.to_string and stack:to_string() or stack
+		for index = 1,#inventory do
+			local itemstack = inventory[index]
+			if itemstack.to_string then
+				inventory[index] = itemstack:to_string()
+			end
 		end
 	end
+	return metat, meta
 end
 
 local we_deserialize = worldedit.deserialize
@@ -802,15 +812,11 @@ local function my_we_deserialize(pos, ...)
 		end
 		local pos = {x=entry.x, y=entry.y, z=entry.z}
 		-- we calls add_node always before setting any meta, save it here
-		local metat = minetest.get_meta(pos):to_table()
-		if is_meta_empty(metat) then
-			metat = nil
-		else
-			make_meta_serializable(metat)
-		end
+		local metat = get_meta_serializable(pos)
 		local new_metat = entry.meta
 		if new_metat
 		and is_meta_empty(new_metat) then
+			-- Worldedit save files usually contain redundant metadata
 			new_metat = nil
 		end
 		local meta_changed = (metat or new_metat)
@@ -1014,17 +1020,13 @@ undo_funcs.nodes = function(name, data)
 	local metastrings = decompressed_data.metastrings
 	for k = 1,#indices_m do
 		local i = indices_m[k]
-		local meta = minetest.get_meta(vector.add(pos1, {
+		local pos = vector.add(pos1, {
 			x = i % ystride,
 			y = math.floor(i / ystride) % ylen,
 			z = math.floor(i / (ystride * ylen))
-		}))
-		local metat = meta:to_table()
-		if is_meta_empty(metat) then
-			metat = nil
-		else
-			make_meta_serializable(metat)
-		end
+		})
+		local metat, meta = get_meta_serializable(pos)
+		meta = meta or minetest.get_meta(pos)
 		meta:from_table(minetest.deserialize(metastrings[k]))
 		metastrings[k] = minetest.serialize(metat)
 	end
