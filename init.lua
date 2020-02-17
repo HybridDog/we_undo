@@ -46,20 +46,20 @@ local function override_chatcommand(cname, func_before, func_after)
 	if func_after then
 		local func = command.func
 		command.func = function(name, ...)
-			local rv = func(name, ...)
-			local custom_rv = func_after(...)
+			local succ, msg = func(name, ...)
+			local new_succ, new_msg = func_after(...)
 			command_invoker = nil
-			if custom_rv ~= nil then
-				return custom_rv
-			end
-			return rv
+			-- Both have to succeed for the return value
+			succ = succ and new_succ
+			msg = new_msg or msg or nil
+			return succ, msg
 		end
 	else
 		local func = command.func
 		command.func = function(...)
-			local rv = func(...)
+			local succ, msg = func(...)
 			command_invoker = nil
-			return rv
+			return succ, msg
 		end
 	end
 end
