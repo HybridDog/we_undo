@@ -418,13 +418,13 @@ local function decompress_nodedata(ccontent)
 		if cnt then
 			local indices = {}
 			local prev_index = 0
-			for i = 1,cnt do
+			for k = 1,cnt do
 				local v = prev_index
 				for f = ccontent.index_bytes, 0, -1 do
 					v = v + 2^(8*f) * data:byte(p)
 					p = p+1
 				end
-				indices[i] = v
+				indices[k] = v
 				prev_index = v
 			end
 			result[indic_names[i]] = indices
@@ -784,7 +784,7 @@ local function get_meta_serializable(pos)
 end
 
 local we_deserialize = worldedit.deserialize
-local function my_we_deserialize(pos, ...)
+local function my_we_deserialize(pos_base, ...)
 	-- remember the previous nodes and meta
 	local nodes = {}
 	local metaens = {}
@@ -844,7 +844,7 @@ local function my_we_deserialize(pos, ...)
 
 	minetest.add_node = my_add_node
 
-	local count = we_deserialize(pos, ...)
+	local count = we_deserialize(pos_base, ...)
 
 	minetest.add_node = add_node
 
@@ -996,10 +996,10 @@ undo_funcs.nodes = function(name, data)
 	local mts = {m_nodes, m_param1s, m_param2s}
 	local indiceses = {indices_n, indices_p1, indices_p2}
 	local contentses = {nodeids, param1s, param2s}
-	for i = 1,3 do
-		local mt = mts[i]
-		local indices = indiceses[i]
-		local contents = contentses[i]
+	for mtsi = 1,3 do
+		local mt = mts[mtsi]
+		local indices = indiceses[mtsi]
+		local contents = contentses[mtsi]
 		for k = 1,#indices do
 			local i = indices[k]
 			local x = i % ystride
