@@ -1027,8 +1027,12 @@ undo_funcs.nodes = function(name, data)
 		})
 		local metat, meta = get_meta_serializable(pos)
 		meta = meta or minetest.get_meta(pos)
-		meta:from_table(minetest.deserialize(metastrings[k]))
-		metastrings[k] = minetest.serialize(metat)
+		if metastrings ~= nil then
+			if metastrings[k] ~= nil then
+				meta:from_table(minetest.deserialize(metastrings[k]))
+			end
+			metastrings[k] = minetest.serialize(metat)
+		end
 	end
 
 	-- update history entry
