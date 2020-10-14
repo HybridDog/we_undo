@@ -454,6 +454,14 @@ local function decompress_nodedata(ccontent)
 	-- get metaens strings
 	if ccontent.metaens_cnt then
 		result.metastrings = minetest.deserialize(data:sub(p))
+		if not result.metastrings then
+			print("Could not deserialize the metadata: " .. data:sub(p))
+			assert(false)
+		end
+		assert(#result.metastrings == ccontent.metaens_cnt,
+			"Invalid number of metadata changes; #result.metastrings: " ..
+			#result.metastrings .. ", ccontent.metaens_cnt: " ..
+			ccontent.metaens_cnt)
 	end
 	return result
 end
@@ -952,6 +960,10 @@ local function my_we_deserialize(pos_base, ...)
 		index_bytes = index_bytes,
 		compressed_data = compressed_data
 	}, command_invoker)
+	assert(#indices_n == #nodeids)
+	assert(#indices_p1 == #param1s)
+	assert(#indices_p2 == #param2s)
+	assert(#indices_m == #metastrings)
 
 	return count
 end
