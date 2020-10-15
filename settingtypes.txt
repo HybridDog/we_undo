@@ -1,18 +1,18 @@
-#    If set to false, only commands which can harm the map are added to the
+#    If set to false, the mod adds only commands which can harm the map to the
 #    journal.
 we_undo.remember_innocuous (remember innocuous changes) bool true
 
-#    This is the maximum amount of commands in the journal of a player.
+#    This is the maximum number of commands in the journal of a player.
 #    The size of the journal is further limited by the memory setting.
-we_undo.max_commands (maximum count of commands) int 256 1
+we_undo.max_commands (maximum number of commands) int 256 1
 
-#    This is the minimum amount of commands in the journal of a player.
+#    This is the minimum number of commands in the journal of a player.
 #    The memory limit is ignored up to the last min_commands commands.
-#    This is because being unable to undo a big mistake is worse than exceeding
-#    the configured memory limit.
-we_undo.min_commands (minimum count of commands) int 3 1
+#    This setting exists because being unable to undo a big mistake is worse
+#    than exceeding the configured memory limit.
+we_undo.min_commands (minimum number of commands) int 3 1
 
-#    If the size of the journal exceeds this limit, old history is removed.
+#    If the size of the journal exceeds this limit, the mod removes old history.
 #    Specify the value in bytes, note that it only considers big data,
 #    approximately.
 #    default value: 2^25 (32 MiB)
