@@ -372,9 +372,9 @@ local function compress_nodedata(nodedata)
 			local prev_index = 0
 			for i = 1,#indices do
 				local index = indices[i]
-				local off = index - prev_index -- always > 0
+				local off = index - prev_index -- always >= 0
 				local v = ""
-				for f = nodedata.index_bytes, 0, -1 do
+				for f = nodedata.index_bytes-1, 0, -1 do
 					v = v .. string.char(math.floor(off * 2^(-8*f)) % 0x100)
 				end
 				data[#data+1] = v
@@ -420,7 +420,7 @@ local function decompress_nodedata(ccontent)
 			local prev_index = 0
 			for k = 1,cnt do
 				local v = prev_index
-				for f = ccontent.index_bytes, 0, -1 do
+				for f = ccontent.index_bytes-1, 0, -1 do
 					v = v + 2^(8*f) * data:byte(p)
 					p = p+1
 				end
@@ -503,9 +503,8 @@ local function we_nodeset_wrapper(func, pos1, pos2, ...)
 	end
 	we_data = false
 
-	-- can be 0 if only one node is changed
 	local index_bytes = math.ceil(math.log(worldedit.volume(pos1, pos2)) /
-		math.log(8))
+		math.log(0x100))
 	local compressed_data = compress_nodedata{
 		indices_n = indices,
 		nodeids = nodeids,
@@ -780,6 +779,11 @@ local function get_meta_serializable(pos)
 	end
 	local meta = minetest.get_meta(pos)
 	local metat = meta:to_table()
+	if is_meta_empty(metat) then
+		-- For some reason minetest.find_nodes_with_meta can find empty
+		-- metadata
+		return
+	end
 	for _, inventory in pairs(metat.inventory) do
 		for index = 1,#inventory do
 			local itemstack = inventory[index]
@@ -936,7 +940,7 @@ local function my_we_deserialize(pos_base, ...)
 
 	-- compress the data and add it to history
 	local index_bytes = math.ceil(math.log(worldedit.volume(minp, maxp)) /
-		math.log(8))
+		math.log(0x100))
 	local compressed_data = compress_nodedata{
 		indices_n = indices_n,
 		indices_p1 = indices_p1,
