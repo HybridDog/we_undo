@@ -364,7 +364,7 @@ end
 
 local indic_names = {"indices_n", "indices_p1", "indices_p2", "indices_m"}
 local function compress_nodedata(nodedata)
-	local data = {}
+	local data, n = {}, 0
 	-- put indices first
 	for j = 1,#indic_names do
 		local indices = nodedata[indic_names[j]]
@@ -377,7 +377,8 @@ local function compress_nodedata(nodedata)
 				for f = nodedata.index_bytes-1, 0, -1 do
 					v = v .. string.char(math.floor(off * 2^(-8*f)) % 0x100)
 				end
-				data[#data+1] = v
+				n = n+1
+				data[n] = v
 				prev_index = index
 			end
 		end
@@ -386,7 +387,8 @@ local function compress_nodedata(nodedata)
 	-- big endian here
 	if nodedata.indices_n then
 		for i = 1,#nodedata.nodeids do
-			data[#data+1] = string.char(math.floor(nodedata.nodeids[i] * 2^-8)
+			n = n+1
+			data[n] = string.char(math.floor(nodedata.nodeids[i] * 2^-8)
 				) .. string.char(nodedata.nodeids[i] % 0x100)
 		end
 	end
@@ -394,15 +396,16 @@ local function compress_nodedata(nodedata)
 	for j = 1,2 do
 		if nodedata["indices_p" .. j] then
 			local vs = nodedata["param" .. j .. "s"]
-			local p = #data
 			for i = 1,#vs do
-				data[p+1] = string.char(vs[i])
+				n = n+1
+				data[n] = string.char(vs[i])
 			end
 		end
 	end
 	-- meta…
 	if nodedata.indices_m then
-		data[#data+1] = minetest.serialize(nodedata.metastrings)
+		n = n+1
+		data[n] = minetest.serialize(nodedata.metastrings)
 	end
 	return minetest.compress(table.concat(data))
 end
