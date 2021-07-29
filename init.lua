@@ -302,15 +302,8 @@ end
 
 ----------------------- Functions common to other ones -------------------------
 
--- Catch confirmation requests (/y or /n follows)
+-- Remember the last command overridings for //y
 local y_pending = {}
-local we_notify = worldedit.player_notify
-function worldedit.player_notify(name, msg)
-	if msg:sub(1, 43) == "WARNING: this operation could affect up to " then
-		y_pending[name] = true
-	end
-	return we_notify(name, msg)
-end
 
 override_chatcommand("/n",
 	function()
@@ -321,35 +314,36 @@ override_chatcommand("/n",
 override_chatcommand("/y",
 	function(...)
 		local t = y_pending[command_invoker]
-		if type(t) == "table"
-		and t.before then
+		if t and t.before then
 			t.before(...)
 		end
 	end,
 	function(...)
 		local t = y_pending[command_invoker]
-		if type(t) == "table"
-		and t.after then
+		if t and t.after then
 			t.after(...)
 		end
 		y_pending[command_invoker] = nil
 	end
 )
 
-local function override_cc_with_confirm(cname, func_before, actual_func_after)
-	-- remember the functions for /y if needed
-	local function func_after(...)
-		if y_pending[command_invoker] then
-			y_pending[command_invoker] = {before = func_before,
-				after = func_after}
-		end
-		return actual_func_after(...)
+local function override_cc_with_confirm(cname, func_before, func_after)
+	-- Remember the functions for //y if needed
+	-- func_before and func_after are always executed before and after
+	-- the command cname.
+	-- func_before and func_after are executed a second time if the
+	-- player then calls //y (unless the player calls //n before //y).
+	-- Therefore these two functions should only do temporary overridings of
+	-- relevant functions, e.g. worldedit.cube.
+	local function func_after_wrap(...)
+		y_pending[command_invoker] = {before = func_before, after = func_after}
+		return func_after(...)
 	end
-	return override_chatcommand(cname, func_before, func_after)
+	return override_chatcommand(cname, func_before, func_after_wrap)
 end
 
 
--- override the worldedit vmanip finish function to catch the data table
+-- Override the worldedit vmanip finish function to catch the data table
 local we_data = false
 local we_manip_end = worldedit.manip_helpers.finish
 function worldedit.manip_helpers.finish(manip, data)
