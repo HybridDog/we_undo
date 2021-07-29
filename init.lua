@@ -461,6 +461,300 @@ local function decompress_nodedata(ccontent)
 	return result
 end
 
+-- tells if the metadata is that dummy
+local function is_meta_empty(metatabl)
+	if metatabl.inventory
+	and next(metatabl.inventory) ~= nil then
+		return false
+	end
+	if metatabl.fields
+	and next(metatabl.fields) ~= nil then
+		return false
+	end
+	for k in pairs(metatabl) do
+		if k ~= "inventory"
+		and k ~= "fields" then
+			return false
+		end
+	end
+	return true
+end
+
+-- Gets information about meta if it is set, otherwise returns nil
+-- the format of the information is the same as in WorldEdit
+local function get_meta_serializable(pos)
+	if not minetest.find_nodes_with_meta(pos, pos)[1] then
+		return
+	end
+	local meta = minetest.get_meta(pos)
+	local metat = meta:to_table()
+	if is_meta_empty(metat) then
+		-- FIXME: is this case covered by minetest.find_nodes_with_meta?
+		minetest.log("error", "metadata should be inexistent")
+		return
+	end
+	for _, inventory in pairs(metat.inventory) do
+		for index = 1,#inventory do
+			local itemstack = inventory[index]
+			if itemstack.to_string then
+				inventory[index] = itemstack:to_string()
+			end
+		end
+	end
+	return metat, meta
+end
+
+-- Collects all metadata in a serialized format inside the given area
+-- This may be a slow function, thus should only be used when needed
+local function get_metadatas_in_area(pos1, pos2)
+	local meta_ps = minetest.find_nodes_with_meta(pos1, pos2)
+	local meta_tables_list = {}
+	local ystride = pos2.x - pos1.x + 1
+	local zstride = (pos2.y - pos1.y + 1) * ystride
+	for i = 1, #meta_ps do
+		local pos = meta_ps[i]
+		local meta = minetest.get_meta(pos)
+		local metat = meta:to_table()
+		if is_meta_empty(metat) then
+			-- FIXME: is this case covered by minetest.find_nodes_with_meta?
+			minetest.log("error", "metadata should be inexistent")
+		else
+			-- Make metat serializable
+			for _, inventory in pairs(metat.inventory) do
+				for index = 1,#inventory do
+					local itemstack = inventory[index]
+					if itemstack.to_string then
+						inventory[index] = itemstack:to_string()
+					end
+				end
+			end
+			local rpos = vector.subtract(pos, pos1)
+			meta_tables_list[#meta_tables_list+1] = {
+				rpos.z * zstride + rpos.y * ystride + rpos.x,
+				metat
+			}
+		end
+	end
+	table.sort(meta_tables_list, function(a, b)
+		return a[1] < b[1]
+	end)
+	local indices_m = {}
+	local metastrings = {}
+	for i = 1, #meta_tables_list do
+		indices_m[i] = meta_tables_list[i][1]
+		metastrings[i] = minetest.serialize(meta_tables_list[i][2])
+	end
+	return indices_m, metastrings
+end
+
+-- A generic function to collect the changed nodes and metadata
+-- (if collect_meta is true) between the times before and after executing func
+local function run_and_capture_changes(func, pos1, pos2, collect_meta)
+	-- Get the node ids, param1s and param2s (before)
+	local manip = minetest.get_voxel_manip()
+	local e1, e2 = manip:read_from_map(pos1, pos2)
+	local area = VoxelArea:new{MinEdge=e1, MaxEdge=e2}
+	local nodeids_before = manip:get_data()
+	local param1s_before = manip:get_light_data()
+	local param2s_before = manip:get_param2_data()
+
+	local indices_m_before, metastrings_before
+	if collect_meta then
+		indices_m_before, metastrings_before = get_metadatas_in_area(pos1, pos2)
+	end
+
+	-- Run the actual function
+	local rvs = {func()}
+
+	-- Get the node ids, param1s and param2s (after)
+	manip = minetest.get_voxel_manip()
+	manip:read_from_map(pos1, pos2)
+	local nodeids_after = manip:get_data()
+	local param1s_after = manip:get_light_data()
+	local param2s_after = manip:get_param2_data()
+
+	local indices_m_after, metastrings_after
+	if collect_meta then
+		indices_m_after, metastrings_after = get_metadatas_in_area(pos1, pos2)
+	end
+
+	-- Collect the changed nodes
+	local ystride = pos2.x - pos1.x + 1
+	local zstride = (pos2.y - pos1.y + 1) * ystride
+	local indices_n = {}
+	local indices_p1 = {}
+	local indices_p2 = {}
+	local nodeids = {}
+	local param1s = {}
+	local param2s = {}
+	for z = pos1.z, pos2.z do
+		for y = pos1.y, pos2.y do
+			for x = pos1.x, pos2.x do
+				local vi_vm = area:index(x,y,z)
+				local vi_my = (z - pos1.z) * zstride
+					+ (y - pos1.y) * ystride
+					+ x - pos1.x
+				if nodeids_after[vi_vm] ~= nodeids_before[vi_vm] then
+					indices_n[#indices_n+1] = vi_my
+					nodeids[#nodeids+1] = nodeids_before[vi_vm]
+				end
+				if param1s_after[vi_vm] ~= param1s_before[vi_vm] then
+					indices_p1[#indices_p1+1] = vi_my
+					param1s[#param1s+1] = param1s_before[vi_vm]
+				end
+				if param2s_after[vi_vm] ~= param2s_before[vi_vm] then
+					indices_p2[#indices_p2+1] = vi_my
+					param2s[#param2s+1] = param2s_before[vi_vm]
+				end
+			end
+		end
+	end
+
+	local indices_m = {}
+	local metastrings = {}
+	if collect_meta then
+		-- Collect all metadata changes
+		local i_after = 1
+		for i_before = 1, #indices_m_before do
+			local vi_before = indices_m_before[i_before]
+			local vi_after = indices_m_after[i_after]
+			if vi_before < vi_after then
+				-- Metadata has been removed at vi_before
+				indices_m[#indices_m+1] = vi_before
+				metastrings[#metastrings+1] = metastrings_before[i_before]
+			elseif vi_before == vi_after then
+				-- Metadata exists before and after
+				if metastrings_before[i_before]
+						~= metastrings_after[i_after] then
+					indices_m[#indices_m+1] = vi_before
+					metastrings[#metastrings+1] = metastrings_before[i_before]
+				end
+				i_after = i_after + 1
+				if i_after > #indices_m_after then
+					break
+				end
+			else
+				while vi_before > vi_after do
+					-- Metadata has been added at vi_after
+					indices_m[#indices_m+1] = vi_after
+					metastrings[#metastrings+1] = "return nil"
+					i_after = i_after + 1
+					if i_after > #indices_m_after then
+						break
+					end
+					vi_after = indices_m_after[i_after]
+				end
+			end
+		end
+		for i = i_after, #indices_m_after do
+			-- Metadata has been added at i
+			indices_m[#indices_m+1] = indices_m_after[i]
+			metastrings[#metastrings+1] = "return nil"
+		end
+	end
+
+	local changes = {
+		indices_n = indices_n,
+		indices_p1 = indices_p1,
+		indices_p2 = indices_p2,
+		indices_m = indices_m,
+		nodeids = nodeids,
+		param1s = param1s,
+		param2s = param2s,
+		metastrings = metastrings,
+		-- index_bytes is needed later for compression
+		index_bytes = math.ceil(math.log(worldedit.volume(pos1, pos2)) /
+			math.log(0x100)),
+	}
+	return rvs, changes
+end
+
+undo_funcs.nodes = function(name, data)
+	local pos1 = data.pos1
+	local pos2 = data.pos2
+	local ylen = pos2.y - pos1.y + 1
+	local ystride = pos2.x - pos1.x + 1
+
+	local decompressed_data = decompress_nodedata{
+		compressed_data = data.compressed_data,
+		nodeids_cnt = data.count_n,
+		param1s_cnt = data.count_p1,
+		param2s_cnt = data.count_p2,
+		metaens_cnt = data.count_m,
+		index_bytes = data.index_bytes
+	}
+	local indices_n = decompressed_data.indices_n
+	local indices_p1 = decompressed_data.indices_p1
+	local indices_p2 = decompressed_data.indices_p2
+	local nodeids = decompressed_data.nodeids
+	local param1s = decompressed_data.param1s
+	local param2s = decompressed_data.param2s
+
+	-- swap the nodes, param1s and param2s in the world and history data
+	local manip = minetest.get_voxel_manip()
+	local e1, e2 = manip:read_from_map(pos1, pos2)
+	local area = VoxelArea:new{MinEdge=e1, MaxEdge=e2}
+	local m_nodes = manip:get_data()
+	local m_param1s = manip:get_light_data()
+	local m_param2s = manip:get_param2_data()
+
+	local mts = {m_nodes, m_param1s, m_param2s}
+	local indiceses = {indices_n, indices_p1, indices_p2}
+	local contentses = {nodeids, param1s, param2s}
+	for mtsi = 1,3 do
+		local mt = mts[mtsi]
+		local indices = indiceses[mtsi]
+		local contents = contentses[mtsi]
+		for k = 1,#indices do
+			local i = indices[k]
+			local x = i % ystride
+			local y = math.floor(i / ystride) % ylen
+			local z = math.floor(i / (ystride * ylen))
+			local vi = area:index(pos1.x + x, pos1.y + y, pos1.z + z)
+			contents[k], mt[vi] = mt[vi], contents[k]
+		end
+	end
+
+	manip:set_data(m_nodes)
+	manip:set_light_data(m_param1s)
+	manip:set_param2_data(m_param2s)
+	manip:write_to_map()
+
+	-- swap metaens strings
+	local indices_m = decompressed_data.indices_m
+	local metastrings = decompressed_data.metastrings
+	for k = 1,#indices_m do
+		local i = indices_m[k]
+		local pos = vector.add(pos1, {
+			x = i % ystride,
+			y = math.floor(i / ystride) % ylen,
+			z = math.floor(i / (ystride * ylen))
+		})
+		local metat, meta = get_meta_serializable(pos)
+		meta = meta or minetest.get_meta(pos)
+		meta:from_table(minetest.deserialize(metastrings[k]))
+		metastrings[k] = minetest.serialize(metat)
+	end
+
+	-- update history entry
+	data.compressed_data = compress_nodedata{
+		indices_n = indices_n,
+		indices_p1 = indices_p1,
+		indices_p2 = indices_p2,
+		indices_m = indices_m,
+		nodeids = nodeids,
+		param1s = param1s,
+		param2s = param2s,
+		metastrings = metastrings,
+		index_bytes = data.index_bytes,
+	}
+	data.mem_usage = #data.compressed_data
+
+	worldedit.player_notify(name, data.count_n .. " nodes set, " ..
+		data.count_p1 .. " param1s set, " .. data.count_p2 ..
+		" param2s set and " .. #indices_m .. " metaens changed")
+end
+
 
 ----------------------- World changing commands --------------------------------
 
@@ -771,52 +1065,12 @@ override_cc_with_confirm("/spiral",
 )
 
 
--- tells if the metadata is that dummy
-local function is_meta_empty(metatabl)
-	if metatabl.inventory
-	and next(metatabl.inventory) ~= nil then
-		return false
-	end
-	if metatabl.fields
-	and next(metatabl.fields) ~= nil then
-		return false
-	end
-	for k in pairs(metatabl) do
-		if k ~= "inventory"
-		and k ~= "fields" then
-			return false
-		end
-	end
-	return true
-end
-
--- Gets information about meta if it is set, otherwise returns nil
--- the format of the information is the same as in WorldEdit
-local function get_meta_serializable(pos)
-	if not minetest.find_nodes_with_meta(pos, pos) then
-		return
-	end
-	local meta = minetest.get_meta(pos)
-	local metat = meta:to_table()
-	if is_meta_empty(metat) then
-		-- For some reason minetest.find_nodes_with_meta can find empty
-		-- metadata
-		return
-	end
-	for _, inventory in pairs(metat.inventory) do
-		for index = 1,#inventory do
-			local itemstack = inventory[index]
-			if itemstack.to_string then
-				inventory[index] = itemstack:to_string()
-			end
-		end
-	end
-	return metat, meta
-end
-
 local we_deserialize = worldedit.deserialize
 local function my_we_deserialize(pos_base, ...)
 	-- remember the previous nodes and meta
+	-- Collect the changes by overriding minetest.add_node since this is
+	-- probably faster than loading the whole area including metadata before
+	-- and after worldedit's operation
 	local nodes = {}
 	local metaens = {}
 	local add_node = minetest.add_node
@@ -995,92 +1249,6 @@ override_cc_with_confirm("/load",
 	end
 )
 
-undo_funcs.nodes = function(name, data)
-	local pos1 = data.pos1
-	local pos2 = data.pos2
-	local ylen = pos2.y - pos1.y + 1
-	local ystride = pos2.x - pos1.x + 1
-
-	local decompressed_data = decompress_nodedata{
-		compressed_data = data.compressed_data,
-		nodeids_cnt = data.count_n,
-		param1s_cnt = data.count_p1,
-		param2s_cnt = data.count_p2,
-		metaens_cnt = data.count_m,
-		index_bytes = data.index_bytes
-	}
-	local indices_n = decompressed_data.indices_n
-	local indices_p1 = decompressed_data.indices_p1
-	local indices_p2 = decompressed_data.indices_p2
-	local nodeids = decompressed_data.nodeids
-	local param1s = decompressed_data.param1s
-	local param2s = decompressed_data.param2s
-
-	-- swap the nodes, param1s and param2s in the world and history data
-	local manip = minetest.get_voxel_manip()
-	local e1, e2 = manip:read_from_map(pos1, pos2)
-	local area = VoxelArea:new{MinEdge=e1, MaxEdge=e2}
-	local m_nodes = manip:get_data()
-	local m_param1s = manip:get_light_data()
-	local m_param2s = manip:get_param2_data()
-
-	local mts = {m_nodes, m_param1s, m_param2s}
-	local indiceses = {indices_n, indices_p1, indices_p2}
-	local contentses = {nodeids, param1s, param2s}
-	for mtsi = 1,3 do
-		local mt = mts[mtsi]
-		local indices = indiceses[mtsi]
-		local contents = contentses[mtsi]
-		for k = 1,#indices do
-			local i = indices[k]
-			local x = i % ystride
-			local y = math.floor(i / ystride) % ylen
-			local z = math.floor(i / (ystride * ylen))
-			local vi = area:index(pos1.x + x, pos1.y + y, pos1.z + z)
-			contents[k], mt[vi] = mt[vi], contents[k]
-		end
-	end
-
-	manip:set_data(m_nodes)
-	manip:set_light_data(m_param1s)
-	manip:set_param2_data(m_param2s)
-	manip:write_to_map()
-
-	-- swap metaens strings
-	local indices_m = decompressed_data.indices_m
-	local metastrings = decompressed_data.metastrings
-	for k = 1,#indices_m do
-		local i = indices_m[k]
-		local pos = vector.add(pos1, {
-			x = i % ystride,
-			y = math.floor(i / ystride) % ylen,
-			z = math.floor(i / (ystride * ylen))
-		})
-		local metat, meta = get_meta_serializable(pos)
-		meta = meta or minetest.get_meta(pos)
-		meta:from_table(minetest.deserialize(metastrings[k]))
-		metastrings[k] = minetest.serialize(metat)
-	end
-
-	-- update history entry
-	data.compressed_data = compress_nodedata{
-		indices_n = indices_n,
-		indices_p1 = indices_p1,
-		indices_p2 = indices_p2,
-		indices_m = indices_m,
-		nodeids = nodeids,
-		param1s = param1s,
-		param2s = param2s,
-		metastrings = metastrings,
-		index_bytes = data.index_bytes,
-	}
-	data.mem_usage = #data.compressed_data
-
-	worldedit.player_notify(name, data.count_n .. " nodes set, " ..
-		data.count_p1 .. " param1s set, " .. data.count_p2 ..
-		" param2s set and " .. #indices_m .. " metaens changed")
-end
-
 
 local original_place_schematic = minetest.place_schematic
 local function my_place_schematic(pos, schematic_path, rotation, replacements,
@@ -1100,86 +1268,29 @@ local function my_place_schematic(pos, schematic_path, rotation, replacements,
 	local pos1 = pos
 	local pos2 = vector.subtract(vector.add(pos1, schem.size), 1)
 
-	-- Get the node ids, param1s and param2s (before)
 	-- Note: schematic placement doesn't change the metadata
-	local manip = minetest.get_voxel_manip()
-	local e1, e2 = manip:read_from_map(pos1, pos2)
-	local area = VoxelArea:new{MinEdge=e1, MaxEdge=e2}
-	local nodeids_before = manip:get_data()
-	local param1s_before = manip:get_light_data()
-	local param2s_before = manip:get_param2_data()
-
-	-- Do the schematic placement
-	local rv = original_place_schematic(pos, schematic_path, rotation,
-		replacements, force_placement, flags)
-
-	-- Get the node ids, param1s and param2s (after)
-	manip = minetest.get_voxel_manip()
-	manip:read_from_map(pos1, pos2)
-	local nodeids_after = manip:get_data()
-	local param1s_after = manip:get_light_data()
-	local param2s_after = manip:get_param2_data()
-
-	-- Collect the changed nodes
-	local ystride = pos2.x - pos1.x + 1
-	local zstride = (pos2.y - pos1.y + 1) * ystride
-	local indices_n = {}
-	local indices_p1 = {}
-	local indices_p2 = {}
-	local nodeids = {}
-	local param1s = {}
-	local param2s = {}
-	for z = pos1.z, pos2.z do
-		for y = pos1.y, pos2.y do
-			for x = pos1.x, pos2.x do
-				local vi_vm = area:index(x,y,z)
-				local vi_my = (z - pos1.z) * zstride
-					+ (y - pos1.y) * ystride
-					+ x - pos1.x
-				if nodeids_after[vi_vm] ~= nodeids_before[vi_vm] then
-					indices_n[#indices_n+1] = vi_my
-					nodeids[#nodeids+1] = nodeids_before[vi_vm]
-				end
-				if param1s_after[vi_vm] ~= param1s_before[vi_vm] then
-					indices_p1[#indices_p1+1] = vi_my
-					param1s[#param1s+1] = param1s_before[vi_vm]
-				end
-				if param2s_after[vi_vm] ~= param2s_before[vi_vm] then
-					indices_p2[#indices_p2+1] = vi_my
-					param2s[#param2s+1] = param2s_before[vi_vm]
-				end
-			end
-		end
-	end
+	local rvs, changes = run_and_capture_changes(function()
+			-- Do the schematic placement
+			return original_place_schematic(pos, schematic_path, rotation,
+				replacements, force_placement, flags)
+		end, pos1, pos2, false)
 
 	-- Compress the collected changes and add it to history
-	local index_bytes = math.ceil(math.log(worldedit.volume(pos1, pos2)) /
-		math.log(0x100))
-	local compressed_data = compress_nodedata{
-		indices_n = indices_n,
-		indices_p1 = indices_p1,
-		indices_p2 = indices_p2,
-		indices_m = {},
-		nodeids = nodeids,
-		param1s = param1s,
-		param2s = param2s,
-		metastrings = {},
-		index_bytes = index_bytes,
-	}
+	local compressed_data = compress_nodedata(changes)
 	add_to_history({
 		type = "nodes",
 		mem_use = #compressed_data,
 		pos1 = pos1,
 		pos2 = pos2,
-		count_n = #nodeids,
-		count_p1 = #param1s,
-		count_p2 = #param2s,
+		count_n = #changes.nodeids,
+		count_p1 = #changes.param1s,
+		count_p2 = #changes.param2s,
 		count_m = 0,
-		index_bytes = index_bytes,
+		index_bytes = changes.index_bytes,
 		compressed_data = compressed_data
 	}, command_invoker)
 
-	return rv
+	return unpack(rvs)
 end
 override_cc_with_confirm("/mtschemplace",
 	function()
@@ -1189,6 +1300,50 @@ override_cc_with_confirm("/mtschemplace",
 		minetest.place_schematic = original_place_schematic
 	end
 )
+
+
+local we_luatransform = worldedit.luatransform
+local function my_luatransform(pos1_actual, pos2_actual, code)
+	local pos1_further, pos2_further = worldedit.sort_pos(pos1_actual,
+		pos2_actual)
+	-- For safety, add a bit extra space since players can do arbitrary
+	-- things at arbitrary positions with luatransform
+	pos1_further = vector.subtract(pos1_further, 5)
+	pos2_further = vector.add(pos2_further, 5)
+
+	-- Use the generic (but not necessarily fast) function to capture the
+	-- changes
+	local rvs, changes = run_and_capture_changes(function()
+			return we_luatransform(pos1_actual, pos2_actual, code)
+		end, pos1_further, pos2_further, true)
+
+	-- Compress the collected changes and add it to history
+	local compressed_data = compress_nodedata(changes)
+	add_to_history({
+		type = "nodes",
+		mem_use = #compressed_data,
+		pos1 = pos1_further,
+		pos2 = pos2_further,
+		count_n = #changes.nodeids,
+		count_p1 = #changes.param1s,
+		count_p2 = #changes.param2s,
+		count_m = 0,
+		index_bytes = changes.index_bytes,
+		compressed_data = compressed_data
+	}, command_invoker)
+
+	return unpack(rvs)
+end
+override_cc_with_confirm("/luatransform",
+	function()
+		worldedit.luatransform = my_luatransform
+	end,
+	function()
+		worldedit.luatransform = we_luatransform
+	end
+)
+
+
 
 
 local time = (minetest.get_us_time() - load_time_start) / 1000000

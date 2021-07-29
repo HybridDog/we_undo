@@ -28,6 +28,7 @@ Supported chatcommands:
 * /spiral
 * /load
 * /mtschemplace
+* /luatransform (nodes and metadata changes inside the selected area)
 * /y
 * /n
 
@@ -68,7 +69,6 @@ Not yet implemented:
 * /restore
 * /allocate
 * /deleteblocks
-* /luatransform
 
 
 
