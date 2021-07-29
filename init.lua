@@ -555,7 +555,7 @@ local function run_and_capture_changes(func, pos1, pos2, collect_meta)
 	end
 
 	-- Run the actual function
-	local rvs = {func()}
+	func()
 
 	-- Get the node ids, param1s and param2s (after)
 	manip = minetest.get_voxel_manip()
@@ -657,7 +657,7 @@ local function run_and_capture_changes(func, pos1, pos2, collect_meta)
 		index_bytes = math.ceil(math.log(worldedit.volume(pos1, pos2)) /
 			math.log(0x100)),
 	}
-	return rvs, changes
+	return changes
 end
 
 undo_funcs.nodes = function(name, data)
@@ -749,7 +749,7 @@ end
 
 ----------------------- World changing commands --------------------------------
 
-local function we_nodeset_wrapper(func, pos1, pos2, ...)
+local function we_nodeset_wrapper(pos1, pos2, func, ...)
 	assert(command_invoker, "Player not known")
 	pos1, pos2 = worldedit.sort_pos(pos1, pos2)
 	-- FIXME: Protection support isn't needed
@@ -760,7 +760,7 @@ local function we_nodeset_wrapper(func, pos1, pos2, ...)
 	local data_before = manip:get_data()
 
 	we_data = nil
-	local rv = func(pos1, pos2, ...)
+	local rv = func(...)
 
 	local ystride = pos2.x - pos1.x + 1
 	local zstride = (pos2.y - pos1.y + 1) * ystride
@@ -854,206 +854,117 @@ undo_info_funcs.nodeids = function(data)
 		" nodes changed"
 end
 
-local we_set = worldedit.set
-local function my_we_set(pos1, pos2, ...)
-	return we_nodeset_wrapper(we_set, pos1, pos2, ...)
-end
-local set_cmds = {"/set", "/mix"}
-for i = 1,2 do
-	override_cc_with_confirm(set_cmds[i],
-		function()
-			worldedit.set = my_we_set
-		end,
-		function()
-			worldedit.set = we_set
-		end
-	)
-end
-
-local we_replace = worldedit.replace
-local function my_we_replace(pos1, pos2, ...)
-	return we_nodeset_wrapper(we_replace, pos1, pos2, ...)
-end
--- both commands share the same function
-local replace_cmds = {"/replace", "/replaceinverse"}
-for i = 1,2 do
-	override_cc_with_confirm(replace_cmds[i],
-		function()
-			worldedit.replace = my_we_replace
-		end,
-		function()
-			worldedit.replace = we_replace
-		end
-	)
-end
-
-local we_cube = worldedit.cube
-local function cube_func(_,_, ...)
-	return we_cube(...)
-end
-local function my_we_cube(pos, w, h, l, ...)
-	local cw, ch, cl = math.ceil(w), math.ceil(h), math.ceil(l)
-	local ox = math.ceil((cw-1)/2)
-	local oz = math.ceil((cl-1)/2)
-	local pos1 = {x = pos.x - ox, y = pos.y, z = pos.z - oz}
-	local pos2 = {x = pos.x + ox, y = pos.y + ch - 1, z = pos.z + oz}
-	return we_nodeset_wrapper(cube_func, pos1, pos2, pos, w, h, l, ...)
-end
-local cube_cmds = {"/cube", "/hollowcube"}
-for i = 1,2 do
-	override_cc_with_confirm(cube_cmds[i],
-		function()
-			worldedit.cube = my_we_cube
-		end,
-		function()
-			worldedit.cube = we_cube
-		end
-	)
-end
-
-local we_sphere = worldedit.sphere
-local function sph_func(_,_, ...)
-	return we_sphere(...)
-end
-local function my_we_sphere(pos, radius, ...)
-	local r = math.ceil(radius)
-	local pos1 = vector.subtract(pos, r)
-	local pos2 = vector.add(pos, r)
-
-	return we_nodeset_wrapper(sph_func, pos1, pos2, pos, radius, ...)
-end
-local sphere_cmds = {"/sphere", "/hollowsphere"}
-for i = 1,2 do
-	override_cc_with_confirm(sphere_cmds[i],
-		function()
-			worldedit.sphere = my_we_sphere
-		end,
-		function()
-			worldedit.sphere = we_sphere
-		end
-	)
-end
-
-local we_dome = worldedit.dome
-local function dome_func(_,_, ...)
-	return we_dome(...)
-end
-local function my_we_dome(pos, radius, ...)
-	local r = math.ceil(radius)
-	local pos1 = vector.subtract(pos, r)
-	local pos2 = vector.add(pos, r)
-
-	-- dome with negative radius looks different, I couldn't test it because
-	-- //dome does not accept negative radii. FIXME
-	assert(radius >= 0)
-
-	-- a dome is a semi shpere, thus it's almost the same as sphere:
-	-- below pos.y no nodes are set.
-	pos1.y = pos.y
-
-	return we_nodeset_wrapper(dome_func, pos1, pos2, pos, radius, ...)
-end
-local dome_cmds = {"/dome", "/hollowdome"}
-for i = 1,2 do
-	override_cc_with_confirm(dome_cmds[i],
-		function()
-			worldedit.dome = my_we_dome
-		end,
-		function()
-			worldedit.dome = we_dome
-		end
-	)
-end
-
-local we_cylinder = worldedit.cylinder
-local function cylinder_func(_,_, ...)
-	return we_cylinder(...)
-end
-local function my_we_cylinder(pos, axis, length, radius, ...)
-	local r = math.ceil(radius)
-	local pos1 = vector.subtract(pos, r)
-	local pos2 = vector.add(pos, r)
-
-	assert(radius >= 0)
-
-	pos1[axis] = pos[axis]
-	pos2[axis] = pos[axis] + length - 1
-	if length < 0 then
-		pos1[axis], pos2[axis] = pos2[axis], pos1[axis]
-		-- with negative length, the cylinder is shifted one node FIXME
-		pos1[axis] = pos1[axis]-1
-		pos2[axis] = pos2[axis]-1
+-- A helper function to override the simple functions, e.g. cube, sphere, etc.
+local function override_nodeid_changer(command_names, function_name,
+		func_get_boundaries)
+	-- The function from worldedit which changes nodes, e.g. worldedit["cube"]
+	local changer_original = worldedit[function_name]
+	-- The overridden function which uses we_nodeset_wrapper to get the nodes
+	-- before the Worldedit operation (changer_original),
+	-- then executes the Worldedit operation,
+	-- and after that calculates and saves the changes
+	local function changer_overridden(...)
+		-- func_get_boundaries depends on the command; it should determine the
+		-- area within which node ids are changed
+		local pos1, pos2 = func_get_boundaries(...)
+		return we_nodeset_wrapper(pos1, pos2, changer_original, ...)
 	end
-
-	return we_nodeset_wrapper(cylinder_func, pos1, pos2, pos, axis, length,
-		radius, ...)
-end
-local cylinder_cmds = {"/cylinder", "/hollowcylinder"}
-for i = 1,2 do
-	override_cc_with_confirm(cylinder_cmds[i],
-		function()
-			worldedit.cylinder = my_we_cylinder
-		end,
-		function()
-			worldedit.cylinder = we_cylinder
-		end
-	)
+	-- Do the before and after overriding
+	for i = 1, #command_names do
+		override_cc_with_confirm(command_names[i],
+			function()
+				worldedit[function_name] = changer_overridden
+			end,
+			function()
+				worldedit[function_name] = changer_original
+			end
+		)
+	end
 end
 
-local we_pyramid = worldedit.pyramid
-local function pyramid_func(_,_, ...)
-	return we_pyramid(...)
-end
-local function my_we_pyramid(pos, axis, height, ...)
-	local h = math.ceil(math.abs(height))
-	local pos1 = vector.subtract(pos, h-1)
-	local pos2 = vector.add(pos, h-1)
 
-	if height > 0 then
+override_nodeid_changer({"/set", "/mix"}, "set", function(pos1, pos2)
+		return pos1, pos2
+	end)
+override_nodeid_changer({"/replace", "/replaceinverse"}, "replace",
+	function(pos1, pos2)
+		return pos1, pos2
+	end)
+override_nodeid_changer({"/cube", "/hollowcube"}, "cube",
+	function(pos, w, h, l)
+		local cw, ch, cl = math.ceil(w), math.ceil(h), math.ceil(l)
+		local ox = math.ceil((cw-1)/2)
+		local oz = math.ceil((cl-1)/2)
+		local pos1 = {x = pos.x - ox, y = pos.y, z = pos.z - oz}
+		local pos2 = {x = pos.x + ox, y = pos.y + ch - 1, z = pos.z + oz}
+		return pos1, pos2
+	end)
+override_nodeid_changer({"/sphere", "/hollowsphere"}, "sphere",
+	function(pos, radius)
+		local r = math.ceil(radius)
+		local pos1 = vector.subtract(pos, r)
+		local pos2 = vector.add(pos, r)
+		return pos1, pos2
+	end)
+override_nodeid_changer({"/dome", "/hollowdome"}, "dome",
+	function(pos, radius)
+		local r = math.ceil(radius)
+		local pos1 = vector.subtract(pos, r)
+		local pos2 = vector.add(pos, r)
+
+		-- dome with negative radius looks different, I couldn't test it because
+		-- //dome does not accept negative radii. FIXME
+		assert(radius >= 0)
+
+		-- a dome is a semi shpere, thus it's almost the same as sphere:
+		-- below pos.y no nodes are set.
+		pos1.y = pos.y
+
+		return pos1, pos2
+	end)
+override_nodeid_changer({"/cylinder", "/hollowcylinder"}, "cylinder",
+	function(pos, axis, length, radius)
+		local r = math.ceil(radius)
+		local pos1 = vector.subtract(pos, r)
+		local pos2 = vector.add(pos, r)
+
+		assert(radius >= 0)
+
 		pos1[axis] = pos[axis]
-	else
-		pos2[axis] = pos[axis]
-	end
-
-	return we_nodeset_wrapper(pyramid_func, pos1, pos2, pos, axis, height, ...)
-end
-local pyramid_cmds = {"/pyramid", "/hollowpyramid"}
-for i = 1,2 do
-	override_cc_with_confirm(pyramid_cmds[i],
-		function()
-			worldedit.pyramid = my_we_pyramid
-		end,
-		function()
-			worldedit.pyramid = we_pyramid
+		pos2[axis] = pos[axis] + length - 1
+		if length < 0 then
+			pos1[axis], pos2[axis] = pos2[axis], pos1[axis]
+			-- With negative length, the cylinder is shifted one node FIXME
+			pos1[axis] = pos1[axis]-1
+			pos2[axis] = pos2[axis]-1
 		end
-	)
-end
+		return pos1, pos2
+	end)
+override_nodeid_changer({"/pyramid", "/hollowpyramid"}, "pyramid",
+	function(pos, axis, height)
+		local h = math.ceil(math.abs(height))
+		local pos1 = vector.subtract(pos, h-1)
+		local pos2 = vector.add(pos, h-1)
 
-local we_spiral = worldedit.spiral
-local function spiral_func(_,_, ...)
-	return we_spiral(...)
-end
-local function my_we_spiral(pos, length, height, spacer, ...)
-	-- FIXME adding the spacer to the extent makes it work
-	local extent = math.ceil(length / 2) + spacer
+		if height > 0 then
+			pos1[axis] = pos[axis]
+		else
+			pos2[axis] = pos[axis]
+		end
+		return pos1, pos2
+	end)
+override_nodeid_changer({"/spiral"}, "spiral",
+	function(pos, length, height, spacer)
+		-- FIXME adding the spacer to the extent makes it work
+		local extent = math.ceil(length / 2) + spacer
 
-	local pos1 = vector.subtract(pos, extent)
-	local pos2 = vector.add(pos, extent)
+		local pos1 = vector.subtract(pos, extent)
+		local pos2 = vector.add(pos, extent)
 
-	pos1.y = pos.y
-	pos2.y = pos.y + math.ceil(height) - 1
-
-	return we_nodeset_wrapper(spiral_func, pos1, pos2, pos, length, height,
-		spacer, ...)
-end
-override_cc_with_confirm("/spiral",
-	function()
-		worldedit.spiral = my_we_spiral
-	end,
-	function()
-		worldedit.spiral = we_spiral
-	end
-)
+		pos1.y = pos.y
+		pos2.y = pos.y + math.ceil(height) - 1
+		return pos1, pos2
+	end)
 
 
 local we_deserialize = worldedit.deserialize
@@ -1241,48 +1152,60 @@ override_cc_with_confirm("/load",
 )
 
 
-local original_place_schematic = minetest.place_schematic
-local function my_place_schematic(pos, schematic_path, rotation, replacements,
-		force_placement, flags)
-	-- Get the area which is changed by the schematic
-	if rotation then
-		minetest.log("error",
-			"Received a rotation from worldedit's schematic placement; " ..
-			"not yet implemented in we_undo")
+-- A helper function to override a complex function, e.g. mtschemplace
+local function get_overridden_changer(changer_original, func_get_boundaries,
+		collect_meta)
+	return function(...)
+		-- Get the boundary positions
+		local pos1, pos2 = func_get_boundaries(...)
+
+		-- Execute the actual function while capturing the changed nodes,
+		-- param1, param2 and metas (if collect_meta is set)
+		local params = {...}
+		local rvs  -- return values from changer_original
+		local changes = run_and_capture_changes(function()
+				rvs = {changer_original(unpack(params))}
+			end, pos1, pos2, collect_meta)
+
+		-- Compress the collected changes and add it to history
+		local compressed_data = compress_nodedata(changes)
+		add_to_history({
+			type = "nodes",
+			mem_use = #compressed_data,
+			pos1 = pos1,
+			pos2 = pos2,
+			count_n = #changes.nodeids,
+			count_p1 = #changes.param1s,
+			count_p2 = #changes.param2s,
+			count_m = #changes.metastrings,
+			index_bytes = changes.index_bytes,
+			compressed_data = compressed_data
+		}, command_invoker)
+
+		-- Return the changer_original's return values
+		return unpack(rvs)
 	end
-	if flags then
-		minetest.log("error",
-			"Received flags from worldedit's schematic placement; " ..
-			"not yet implemented in we_undo")
-	end
-	local schem = minetest.read_schematic(schematic_path, {})
-	local pos1 = pos
-	local pos2 = vector.subtract(vector.add(pos1, schem.size), 1)
-
-	-- Note: schematic placement doesn't change the metadata
-	local rvs, changes = run_and_capture_changes(function()
-			-- Do the schematic placement
-			return original_place_schematic(pos, schematic_path, rotation,
-				replacements, force_placement, flags)
-		end, pos1, pos2, false)
-
-	-- Compress the collected changes and add it to history
-	local compressed_data = compress_nodedata(changes)
-	add_to_history({
-		type = "nodes",
-		mem_use = #compressed_data,
-		pos1 = pos1,
-		pos2 = pos2,
-		count_n = #changes.nodeids,
-		count_p1 = #changes.param1s,
-		count_p2 = #changes.param2s,
-		count_m = 0,
-		index_bytes = changes.index_bytes,
-		compressed_data = compressed_data
-	}, command_invoker)
-
-	return unpack(rvs)
 end
+
+local original_place_schematic = minetest.place_schematic
+local my_place_schematic = get_overridden_changer(original_place_schematic,
+	function(pos, schematic_path, rotation, _, _, flags)
+		-- Get the area which is changed by the schematic
+		if rotation then
+			minetest.log("error",
+				"Received a rotation from worldedit's schematic placement; " ..
+				"not yet implemented in we_undo")
+		end
+		if flags then
+			minetest.log("error",
+				"Received flags from worldedit's schematic placement; " ..
+				"not yet implemented in we_undo")
+		end
+		local schem = minetest.read_schematic(schematic_path, {})
+		local pos1 = pos
+		local pos2 = vector.subtract(vector.add(pos1, schem.size), 1)
+		return pos1, pos2
+	end, false)
 override_cc_with_confirm("/mtschemplace",
 	function()
 		minetest.place_schematic = my_place_schematic
@@ -1294,37 +1217,16 @@ override_cc_with_confirm("/mtschemplace",
 
 
 local we_luatransform = worldedit.luatransform
-local function my_luatransform(pos1_actual, pos2_actual, code)
-	local pos1_further, pos2_further = worldedit.sort_pos(pos1_actual,
-		pos2_actual)
-	-- For safety, add a bit extra space since players can do arbitrary
-	-- things at arbitrary positions with luatransform
-	pos1_further = vector.subtract(pos1_further, 5)
-	pos2_further = vector.add(pos2_further, 5)
-
-	-- Use the generic (but not necessarily fast) function to capture the
-	-- changes
-	local rvs, changes = run_and_capture_changes(function()
-			return we_luatransform(pos1_actual, pos2_actual, code)
-		end, pos1_further, pos2_further, true)
-
-	-- Compress the collected changes and add it to history
-	local compressed_data = compress_nodedata(changes)
-	add_to_history({
-		type = "nodes",
-		mem_use = #compressed_data,
-		pos1 = pos1_further,
-		pos2 = pos2_further,
-		count_n = #changes.nodeids,
-		count_p1 = #changes.param1s,
-		count_p2 = #changes.param2s,
-		count_m = 0,
-		index_bytes = changes.index_bytes,
-		compressed_data = compressed_data
-	}, command_invoker)
-
-	return unpack(rvs)
-end
+local my_luatransform = get_overridden_changer(we_luatransform,
+	function(pos1_actual, pos2_actual)
+		local pos1_further, pos2_further = worldedit.sort_pos(pos1_actual,
+			pos2_actual)
+		-- For safety, add a bit extra space since players can do arbitrary
+		-- things at arbitrary positions with luatransform
+		pos1_further = vector.subtract(pos1_further, 5)
+		pos2_further = vector.add(pos2_further, 5)
+		return pos1_further, pos2_further
+	end, true)
 override_cc_with_confirm("/luatransform",
 	function()
 		worldedit.luatransform = my_luatransform
