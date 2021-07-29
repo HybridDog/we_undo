@@ -16,6 +16,7 @@ Supported chatcommands:
 * /mix
 * /replace and /r
 * /replaceinverse and /ri
+* /cube and /hollowcube
 * /sphere and /spr
 * /hollowsphere and /hspr
 * /dome and /do
@@ -51,7 +52,6 @@ Not yet implemented:
 * /contract
 * /outset
 * /inset
-* /cube /hollowcube
 * /copy
 * /move
 * /stack

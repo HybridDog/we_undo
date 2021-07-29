@@ -602,6 +602,30 @@ for i = 1,2 do
 	)
 end
 
+local we_cube = worldedit.cube
+local function cube_func(_,_, ...)
+	return we_cube(...)
+end
+local function my_we_cube(pos, w, h, l, ...)
+	local cw, ch, cl = math.ceil(w), math.ceil(h), math.ceil(l)
+	local ox = math.ceil((cw-1)/2)
+	local oz = math.ceil((cl-1)/2)
+	local pos1 = {x = pos.x - ox, y = pos.y, z = pos.z - oz}
+	local pos2 = {x = pos.x + ox, y = pos.y + ch - 1, z = pos.z + oz}
+	return we_nodeset_wrapper(cube_func, pos1, pos2, pos, w, h, l, ...)
+end
+local cube_cmds = {"/cube", "/hollowcube"}
+for i = 1,2 do
+	override_cc_with_confirm(cube_cmds[i],
+		function()
+			worldedit.cube = my_we_cube
+		end,
+		function()
+			worldedit.cube = we_cube
+		end
+	)
+end
+
 local we_sphere = worldedit.sphere
 local function sph_func(_,_, ...)
 	return we_sphere(...)
