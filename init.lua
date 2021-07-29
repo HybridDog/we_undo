@@ -1,6 +1,3 @@
-local load_time_start = minetest.get_us_time()
-
-
 ----------------- Settings -----------------------------------------------------
 
 local remember_innocuous =
@@ -1342,14 +1339,3 @@ override_cc_with_confirm("/luatransform",
 		worldedit.luatransform = we_luatransform
 	end
 )
-
-
-
-
-local time = (minetest.get_us_time() - load_time_start) / 1000000
-local msg = "[we_undo] loaded after ca. " .. time .. " seconds."
-if time > 0.01 then
-	print(msg)
-else
-	minetest.log("info", msg)
-end
