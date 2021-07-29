@@ -1,14 +1,22 @@
+## Usage
+
 `//undo` undo the latest worldedit command<br/>
 `//redo` redo what was just undone<br/>
 `//show_journal` view what can be undone and redone
 
 The changes of nodes after invoking /set are compressed to improve memory usage.
 
-Related issues:
+
+## Related issues:
+
 * https://github.com/Uberi/Minetest-WorldEdit/issues/43
 * https://forum.minetest.net/viewtopic.php?p=296543#p296543
 
-Supported chatcommands:
+
+## Implemented and missing Worldedit commands
+
+#### Supported chatcommands
+
 * /pos1 and /1
 * /pos2 and /2
 * /p
@@ -16,6 +24,7 @@ Supported chatcommands:
 * /mix
 * /replace and /r
 * /replaceinverse and /ri
+* /orient
 * /cube and /hollowcube
 * /sphere and /spr
 * /hollowsphere and /hspr
@@ -28,11 +37,12 @@ Supported chatcommands:
 * /spiral
 * /load
 * /mtschemplace
-* /luatransform (nodes and metadata changes inside the selected area)
 * /y
 * /n
 
-Ignored chatcommands:
+
+#### Ignored chatcommands
+
 * /lua
 * /clearobjects
 * /fixlight
@@ -45,7 +55,9 @@ Ignored chatcommands:
 * /volume and /v
 * /about
 
-Not yet implemented:
+
+#### Not yet implemented
+
 * /fixedpos /fp
 * /reset /rst
 * /shift
@@ -59,9 +71,7 @@ Not yet implemented:
 * /stack2
 * /scale
 * /transpose
-* /flip
 * /rotate
-* /orient
 * /drain
 * /hide
 * /suppress
@@ -71,8 +81,16 @@ Not yet implemented:
 * /deleteblocks
 
 
+#### Partly implemented
 
-TODO:
+No medatada support:
+* /luatransform (nodes and metadata changes inside the selected area)
+* /flip
+
+
+
+## TODO
+
 * Add parameters to undo and redo: undo the last n
 * Allow undoing changes which happened before other changes (considered unsafe)
 	e.g. //undo ~1 to undo the change before the latest one
@@ -80,3 +98,4 @@ TODO:
 * Implement more commands
 * worldedit pyramid fix
 * Fix the shown "nodes changed" count
+* Fix metadata collecting in run_and_capture_changes

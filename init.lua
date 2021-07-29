@@ -541,6 +541,9 @@ end
 -- A generic function to collect the changed nodes and metadata
 -- (if collect_meta is true) between the times before and after executing func
 local function run_and_capture_changes(func, pos1, pos2, collect_meta)
+	-- FIXME: collecting metadata doesn't work correctly yet.
+	collect_meta = false
+
 	-- Get the node ids, param1s and param2s (before)
 	local manip = minetest.get_voxel_manip()
 	local e1, e2 = manip:read_from_map(pos1, pos2)
@@ -1158,6 +1161,7 @@ local function get_overridden_changer(changer_original, func_get_boundaries,
 	return function(...)
 		-- Get the boundary positions
 		local pos1, pos2 = func_get_boundaries(...)
+		pos1, pos2 = worldedit.sort_pos(pos1, pos2)
 
 		-- Execute the actual function while capturing the changed nodes,
 		-- param1, param2 and metas (if collect_meta is set)
@@ -1215,7 +1219,6 @@ override_cc_with_confirm("/mtschemplace",
 	end
 )
 
-
 local we_luatransform = worldedit.luatransform
 local my_luatransform = get_overridden_changer(we_luatransform,
 	function(pos1_actual, pos2_actual)
@@ -1235,3 +1238,25 @@ override_cc_with_confirm("/luatransform",
 		worldedit.luatransform = we_luatransform
 	end
 )
+
+local function override_we_changer(command_name, function_name, collect_meta,
+		func_get_boundaries)
+	local original_changer = worldedit[function_name]
+	local my_changer = get_overridden_changer(original_changer,
+		func_get_boundaries, collect_meta)
+	override_cc_with_confirm(command_name,
+		function()
+			worldedit[function_name] = my_changer
+		end,
+		function()
+			worldedit[function_name] = original_changer
+		end
+	)
+end
+
+override_we_changer("/flip", "flip", true, function(pos1, pos2)
+		return vector.new(pos1), vector.new(pos2)
+	end)
+override_we_changer("/orient", "orient", false, function(pos1, pos2)
+		return vector.new(pos1), vector.new(pos2)
+	end)
