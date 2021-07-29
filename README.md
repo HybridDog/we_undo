@@ -26,12 +26,12 @@ Supported chatcommands:
 * /hollowpyramid and /hpyr
 * /spiral
 * /load
+* /mtschemplace
 * /y
 * /n
 
 Ignored chatcommands:
 * /lua
-* /luatransform
 * /clearobjects
 * /fixlight
 * /save
@@ -67,8 +67,8 @@ Not yet implemented:
 * /highlight
 * /restore
 * /allocate
-* /mtschemplace
 * /deleteblocks
+* /luatransform
 
 
 

@@ -1058,6 +1058,115 @@ undo_funcs.nodes = function(name, data)
 end
 
 
+local original_place_schematic = minetest.place_schematic
+local function my_place_schematic(pos, schematic_path, rotation, replacements,
+		force_placement, flags)
+	-- Get the area which is changed by the schematic
+	if rotation then
+		minetest.log("error",
+			"Received a rotation from worldedit's schematic placement; " ..
+			"not yet implemented in we_undo")
+	end
+	if flags then
+		minetest.log("error",
+			"Received flags from worldedit's schematic placement; " ..
+			"not yet implemented in we_undo")
+	end
+	local schem = minetest.read_schematic(schematic_path, {})
+	local pos1 = pos
+	local pos2 = vector.subtract(vector.add(pos1, schem.size), 1)
+
+	-- Get the node ids, param1s and param2s (before)
+	-- Note: schematic placement doesn't change the metadata
+	local manip = minetest.get_voxel_manip()
+	local e1, e2 = manip:read_from_map(pos1, pos2)
+	local area = VoxelArea:new{MinEdge=e1, MaxEdge=e2}
+	local nodeids_before = manip:get_data()
+	local param1s_before = manip:get_light_data()
+	local param2s_before = manip:get_param2_data()
+
+	-- Do the schematic placement
+	local rv = original_place_schematic(pos, schematic_path, rotation,
+		replacements, force_placement, flags)
+
+	-- Get the node ids, param1s and param2s (after)
+	manip = minetest.get_voxel_manip()
+	manip:read_from_map(pos1, pos2)
+	local nodeids_after = manip:get_data()
+	local param1s_after = manip:get_light_data()
+	local param2s_after = manip:get_param2_data()
+
+	-- Collect the changed nodes
+	local ystride = pos2.x - pos1.x + 1
+	local zstride = (pos2.y - pos1.y + 1) * ystride
+	local indices_n = {}
+	local indices_p1 = {}
+	local indices_p2 = {}
+	local nodeids = {}
+	local param1s = {}
+	local param2s = {}
+	for z = pos1.z, pos2.z do
+		for y = pos1.y, pos2.y do
+			for x = pos1.x, pos2.x do
+				local vi_vm = area:index(x,y,z)
+				local vi_my = (z - pos1.z) * zstride
+					+ (y - pos1.y) * ystride
+					+ x - pos1.x
+				if nodeids_after[vi_vm] ~= nodeids_before[vi_vm] then
+					indices_n[#indices_n+1] = vi_my
+					nodeids[#nodeids+1] = nodeids_before[vi_vm]
+				end
+				if param1s_after[vi_vm] ~= param1s_before[vi_vm] then
+					indices_p1[#indices_p1+1] = vi_my
+					param1s[#param1s+1] = param1s_before[vi_vm]
+				end
+				if param2s_after[vi_vm] ~= param2s_before[vi_vm] then
+					indices_p2[#indices_p2+1] = vi_my
+					param2s[#param2s+1] = param2s_before[vi_vm]
+				end
+			end
+		end
+	end
+
+	-- Compress the collected changes and add it to history
+	local index_bytes = math.ceil(math.log(worldedit.volume(pos1, pos2)) /
+		math.log(0x100))
+	local compressed_data = compress_nodedata{
+		indices_n = indices_n,
+		indices_p1 = indices_p1,
+		indices_p2 = indices_p2,
+		indices_m = {},
+		nodeids = nodeids,
+		param1s = param1s,
+		param2s = param2s,
+		metastrings = {},
+		index_bytes = index_bytes,
+	}
+	add_to_history({
+		type = "nodes",
+		mem_use = #compressed_data,
+		pos1 = pos1,
+		pos2 = pos2,
+		count_n = #nodeids,
+		count_p1 = #param1s,
+		count_p2 = #param2s,
+		count_m = 0,
+		index_bytes = index_bytes,
+		compressed_data = compressed_data
+	}, command_invoker)
+
+	return rv
+end
+override_cc_with_confirm("/mtschemplace",
+	function()
+		minetest.place_schematic = my_place_schematic
+	end,
+	function()
+		minetest.place_schematic = original_place_schematic
+	end
+)
+
+
 local time = (minetest.get_us_time() - load_time_start) / 1000000
 local msg = "[we_undo] loaded after ca. " .. time .. " seconds."
 if time > 0.01 then

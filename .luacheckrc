@@ -7,6 +7,9 @@ read_globals = {
 			add_node = {
 				read_only = false
 			},
+			place_schematic = {
+				read_only = false
+			},
 			registered_chatcommands = {
 				read_only = false,
 				other_fields = true
