@@ -1260,3 +1260,48 @@ override_we_changer("/flip", "flip", true, function(pos1, pos2)
 override_we_changer("/orient", "orient", false, function(pos1, pos2)
 		return vector.new(pos1), vector.new(pos2)
 	end)
+
+local function get_transpose_boundaries(pos1, pos2, axis1, axis2)
+	-- Copied from Worldedit
+	pos1, pos2 = worldedit.sort_pos(pos1, pos2)
+	local extent1 = pos2[axis1] - pos1[axis1]
+	local extent2 = pos2[axis2] - pos1[axis2]
+	-- Calculate the new position 2 after transposition
+	local new_pos2 = {x=pos2.x, y=pos2.y, z=pos2.z}
+	new_pos2[axis1] = pos1[axis1] + extent2
+	new_pos2[axis2] = pos1[axis2] + extent1
+
+	-- Get the positions for the cuboid hull
+	for c in pairs(pos1) do
+		pos1[c] = math.min(pos1[c], new_pos2[c])
+		pos2[c] = math.max(pos2[c], new_pos2[c])
+	end
+	return pos1, pos2
+end
+override_we_changer("/transpose", "transpose", true, get_transpose_boundaries)
+override_we_changer("/rotate", "rotate", true, function(pos1, pos2, axis, angle)
+		-- Rotate calls flip and transpose, so get_transpose_boundaries works
+		-- here, too
+		if angle % 360 == 180 then
+			-- Only flip is used
+			return pos1, pos2
+		end
+		local other1, other2 = worldedit.get_axis_others(axis)
+		return get_transpose_boundaries(pos1, pos2, other1, other2)
+	end)
+
+override_we_changer("/stretch", "stretch", true, function(pos1, pos2,
+			stretch_x, stretch_y, stretch_z)
+		if stretch_x % 1 ~= 0 or stretch_y % 1 ~= 0 or stretch_z % 1 ~= 0 then
+			minetest.log("error", "expected integer values for stretch")
+		end
+		-- Copied from Worldedit
+		local size_x, size_y, size_z = stretch_x - 1, stretch_y - 1,
+			stretch_z - 1
+		local new_pos2 = {
+			x = pos1.x + (pos2.x - pos1.x) * stretch_x + size_x,
+			y = pos1.y + (pos2.y - pos1.y) * stretch_y + size_y,
+			z = pos1.z + (pos2.z - pos1.z) * stretch_z + size_z,
+		}
+		return pos1, new_pos2
+	end)

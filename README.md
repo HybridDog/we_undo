@@ -4,7 +4,14 @@
 `//redo` redo what was just undone<br/>
 `//show_journal` view what can be undone and redone
 
-The changes of nodes after invoking /set are compressed to improve memory usage.
+Undoing reverts changes of nodes (name, param1 and param2) and metadata.
+Node timers are not yet supported.
+The undo functionality should help against accidents;
+however, it should not be considered reliable since there is no guarantee that
+undoing always is possible or works correctly.
+
+The changes of nodes after invoking a command such as /set are compressed to
+improve memory usage.
 
 
 ## Related issues:
@@ -49,6 +56,10 @@ The changes of nodes after invoking /set are compressed to improve memory usage.
 * /save
 * /mtschemcreate
 * /mtschemprob
+* /hide
+* /suppress
+* /highlight
+* /restore
 * /inspect /i
 * /mark /mk
 * /unmark /umk
@@ -69,23 +80,19 @@ The changes of nodes after invoking /set are compressed to improve memory usage.
 * /move
 * /stack
 * /stack2
-* /scale
-* /transpose
-* /rotate
 * /drain
-* /hide
-* /suppress
-* /highlight
-* /restore
 * /allocate
 * /deleteblocks
 
 
 #### Partly implemented
 
-No medatada support:
+No metadata support:
 * /luatransform (nodes and metadata changes inside the selected area)
 * /flip
+* /transpose (the marker position change is not saved)
+* /rotate (the marker position change is not saved)
+* /stretch (the marker position change is not saved)
 
 
 
