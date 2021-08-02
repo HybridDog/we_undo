@@ -480,8 +480,8 @@ local function get_meta_serializable(pos)
 	local meta = minetest.get_meta(pos)
 	local metat = meta:to_table()
 	if is_meta_empty(metat) then
-		-- FIXME: is this case covered by minetest.find_nodes_with_meta?
-		minetest.log("error", "metadata should be inexistent")
+		-- minetest.find_nodes_with_meta often finds empty metadata
+		--~ minetest.log("error", "metadata should be inexistent")
 		return
 	end
 	for _, inventory in pairs(metat.inventory) do
@@ -506,10 +506,7 @@ local function get_metadatas_in_area(pos1, pos2)
 		local pos = meta_ps[i]
 		local meta = minetest.get_meta(pos)
 		local metat = meta:to_table()
-		if is_meta_empty(metat) then
-			-- FIXME: is this case covered by minetest.find_nodes_with_meta?
-			minetest.log("error", "metadata should be inexistent")
-		else
+		if not is_meta_empty(metat) then
 			-- Make metat serializable
 			for _, inventory in pairs(metat.inventory) do
 				for index = 1,#inventory do
@@ -524,6 +521,9 @@ local function get_metadatas_in_area(pos1, pos2)
 				rpos.z * zstride + rpos.y * ystride + rpos.x,
 				metat
 			}
+		--~ else
+			-- minetest.find_nodes_with_meta often finds empty metadata
+			--~ minetest.log("error", "metadata should be inexistent")
 		end
 	end
 	table.sort(meta_tables_list, function(a, b)
@@ -541,8 +541,6 @@ end
 -- A generic function to collect the changed nodes and metadata
 -- (if collect_meta is true) between the times before and after executing func
 local function run_and_capture_changes(func, pos1, pos2, collect_meta)
-	-- FIXME: collecting metadata doesn't work correctly yet.
-	collect_meta = false
 
 	-- Get the node ids, param1s and param2s (before)
 	local manip = minetest.get_voxel_manip()
@@ -608,14 +606,16 @@ local function run_and_capture_changes(func, pos1, pos2, collect_meta)
 	local metastrings = {}
 	if collect_meta then
 		-- Collect all metadata changes
+		local i_before = 1
 		local i_after = 1
-		for i_before = 1, #indices_m_before do
+		while i_before <= #indices_m_before and i_after <= #indices_m_after do
 			local vi_before = indices_m_before[i_before]
 			local vi_after = indices_m_after[i_after]
 			if vi_before < vi_after then
 				-- Metadata has been removed at vi_before
 				indices_m[#indices_m+1] = vi_before
 				metastrings[#metastrings+1] = metastrings_before[i_before]
+				i_before = i_before+1
 			elseif vi_before == vi_after then
 				-- Metadata exists before and after
 				if metastrings_before[i_before]
@@ -624,26 +624,26 @@ local function run_and_capture_changes(func, pos1, pos2, collect_meta)
 					metastrings[#metastrings+1] = metastrings_before[i_before]
 				end
 				i_after = i_after + 1
-				if i_after > #indices_m_after then
-					break
-				end
+				i_before = i_before + 1
 			else
-				while vi_before > vi_after do
-					-- Metadata has been added at vi_after
-					indices_m[#indices_m+1] = vi_after
-					metastrings[#metastrings+1] = "return nil"
-					i_after = i_after + 1
-					if i_after > #indices_m_after then
-						break
-					end
-					vi_after = indices_m_after[i_after]
-				end
+				-- Metadata has been added at vi_after
+				indices_m[#indices_m+1] = vi_after
+				metastrings[#metastrings+1] = "return nil"
+				i_after = i_after + 1
 			end
 		end
-		for i = i_after, #indices_m_after do
-			-- Metadata has been added at i
-			indices_m[#indices_m+1] = indices_m_after[i]
-			metastrings[#metastrings+1] = "return nil"
+		if i_before <= #indices_m_before then
+			for i = i_before, #indices_m_before do
+				-- All remaining removed metadata
+				indices_m[#indices_m+1] = indices_m_before[i]
+				metastrings[#metastrings+1] = metastrings_before[i]
+			end
+		else
+			for i = i_after, #indices_m_after do
+				-- All remaining added metadata
+				indices_m[#indices_m+1] = indices_m_after[i]
+				metastrings[#metastrings+1] = "return nil"
+			end
 		end
 	end
 

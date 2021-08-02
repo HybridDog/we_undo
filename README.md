@@ -32,6 +32,7 @@ improve memory usage.
 * /replace and /r
 * /replaceinverse and /ri
 * /orient
+* /flip
 * /cube and /hollowcube
 * /sphere and /spr
 * /hollowsphere and /hspr
@@ -44,6 +45,7 @@ improve memory usage.
 * /spiral
 * /load
 * /mtschemplace
+* /luatransform (nodes and metadata changes inside the selected area)
 * /y
 * /n
 
@@ -87,9 +89,6 @@ improve memory usage.
 
 #### Partly implemented
 
-No metadata support:
-* /luatransform (nodes and metadata changes inside the selected area)
-* /flip
 * /transpose (the marker position change is not saved)
 * /rotate (the marker position change is not saved)
 * /stretch (the marker position change is not saved)
@@ -105,4 +104,3 @@ No metadata support:
 * Implement more commands
 * worldedit pyramid fix
 * Fix the shown "nodes changed" count
-* Fix metadata collecting in run_and_capture_changes
