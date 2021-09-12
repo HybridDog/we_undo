@@ -1,8 +1,11 @@
 ## Usage
 
-`//undo` undo the latest worldedit command<br/>
-`//redo` redo what was just undone<br/>
-`//show_journal` view what can be undone and redone
+* `//undo` undo the latest worldedit command
+* `//redo` redo what was just undone
+* `//show_journal` view what can be undone and redone
+* With the [more_chatcommands](https://github.com/red-001/more_chatcommands)
+  mod, other player's changes can be undone with `/run_as <playername> //undo`,
+  where `<playername>` is the other player's name.
 
 Undoing reverts changes of nodes (name, param1 and param2) and metadata.
 Node timers are not yet supported.
@@ -97,10 +100,12 @@ improve memory usage.
 
 ## TODO
 
-* Add parameters to undo and redo: undo the last n
 * Allow undoing changes which happened before other changes (considered unsafe)
 	e.g. //undo ~1 to undo the change before the latest one
-* Add times to the changes, show in //show_journal
-* Implement more commands
+* Add code for more of the WorldEdit chat commands (see the lists above)
 * worldedit pyramid fix
-* Fix the shown "nodes changed" count
+* Improve the //show_journal output
+  * Show the UTC time of the changes
+  * Check if the shown number of changed nodes is correct
+  * Show the executed chat command and parameters
+  * Show the affected area, number of changed metadatas, nodes, etc.
