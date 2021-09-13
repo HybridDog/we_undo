@@ -103,9 +103,6 @@ improve memory usage.
 * Allow undoing changes which happened before other changes (considered unsafe)
 	e.g. //undo ~1 to undo the change before the latest one
 * Add code for more of the WorldEdit chat commands (see the lists above)
-* worldedit pyramid fix
-* Improve the //show_journal output
-  * Show the UTC time of the changes
-  * Check if the shown number of changed nodes is correct
-  * Show the executed chat command and parameters
-  * Show the affected area, number of changed metadatas, nodes, etc.
+* Add a verbose option to the //show_journal output to show detailed information
+  such as the UTC time when the changes happened and the required memory to
+  store them

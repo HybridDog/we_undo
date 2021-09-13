@@ -216,9 +216,10 @@ minetest.register_chatcommand("/show_journal", {
 					minetest.get_color_escape_sequence"#8ABDA9" .. "* "
 			end
 			local data = j.ring[(j.start + i) % max_commands]
-			info = info .. data.type
 			if undo_info_funcs[data.type] then
-				info = info .. ": " .. undo_info_funcs[data.type](data)
+				info = info .. undo_info_funcs[data.type](data)
+			else
+				info = info .. data.type
 			end
 			if i < j.entry_count-1 then
 				info = info .. "\n" ..
@@ -293,7 +294,7 @@ if remember_innocuous then
 		if not data.pos then
 			return "Set pos" .. data.id
 		end
-		return "changed pos" .. data.id .. ", previous value: " ..
+		return "Changed pos" .. data.id .. ", previous value: " ..
 			minetest.pos_to_string(data.pos)
 	end
 
@@ -312,16 +313,16 @@ override_chatcommand("/n",
 )
 
 override_chatcommand("/y",
-	function(...)
+	function()
 		local t = y_pending[command_invoker]
 		if t and t.before then
-			t.before(...)
+			t.before(t.params)
 		end
 	end,
-	function(...)
+	function()
 		local t = y_pending[command_invoker]
 		if t and t.after then
-			t.after(...)
+			t.after(t.params)
 		end
 		y_pending[command_invoker] = nil
 	end
@@ -335,9 +336,10 @@ local function override_cc_with_confirm(cname, func_before, func_after)
 	-- player then calls //y (unless the player calls //n before //y).
 	-- Therefore these two functions should only do temporary overridings of
 	-- relevant functions, e.g. worldedit.cube.
-	local function func_after_wrap(...)
-		y_pending[command_invoker] = {before = func_before, after = func_after}
-		return func_after(...)
+	local function func_after_wrap(params)
+		y_pending[command_invoker] = {before = func_before, after = func_after,
+			params = params}
+		return func_after(params)
 	end
 	return override_chatcommand(cname, func_before, func_after_wrap)
 end
@@ -748,11 +750,45 @@ undo_funcs.nodes = function(name, data)
 		data.count_p1 .. " param1s set, " .. data.count_p2 ..
 		" param2s set and " .. #indices_m .. " metaens changed")
 end
+undo_info_funcs.nodes = function(data)
+	local changed_info = {}
+	local changed_info_numbers = {}
+	if data.count_n > 0 then
+		changed_info[#changed_info+1] = "nodeids"
+		changed_info_numbers[#changed_info_numbers+1] = data.count_n
+	end
+	if data.count_p1 > 0 then
+		changed_info[#changed_info+1] = "param1"
+		changed_info_numbers[#changed_info_numbers+1] = data.count_p1
+	end
+	if data.count_p2 > 0 then
+		changed_info[#changed_info+1] = "param2"
+		changed_info_numbers[#changed_info_numbers+1] = data.count_p2
+	end
+	if data.count_m > 0 then
+		changed_info[#changed_info+1] = "metadata"
+		changed_info_numbers[#changed_info_numbers+1] = data.count_m
+	end
+	changed_info = "(" .. table.concat(changed_info, ", ") .. ")"
+	changed_info_numbers = "(" .. table.concat(changed_info_numbers, ", ") ..
+		")"
+	if changed_info == "()" then
+		changed_info = ", no node, param1, param2 or metadata changes"
+	else
+		changed_info = ", number of changed " .. changed_info .. ": " ..
+			changed_info_numbers
+	end
+	return string.format('Command: "%s", minp: %s, maxp: %s%s',
+		data.command,
+		minetest.pos_to_string(data.pos1),
+		minetest.pos_to_string(data.pos2),
+		changed_info)
+end
 
 
 ----------------------- World changing commands --------------------------------
 
-local function we_nodeset_wrapper(pos1, pos2, func, ...)
+local function we_nodeset_wrapper(pos1, pos2, command, func, ...)
 	assert(command_invoker, "Player not known")
 	pos1, pos2 = worldedit.sort_pos(pos1, pos2)
 	-- FIXME: Protection support isn't needed
@@ -763,7 +799,7 @@ local function we_nodeset_wrapper(pos1, pos2, func, ...)
 	local data_before = manip:get_data()
 
 	we_data = nil
-	local rv = func(...)
+	local return_values = {func(...)}
 
 	local ystride = pos2.x - pos1.x + 1
 	local zstride = (pos2.y - pos1.y + 1) * ystride
@@ -795,6 +831,7 @@ local function we_nodeset_wrapper(pos1, pos2, func, ...)
 	}
 	add_to_history({
 		type = "nodeids",
+		command = command,
 		mem_use = #compressed_data,
 		pos1 = pos1,
 		pos2 = pos2,
@@ -803,7 +840,7 @@ local function we_nodeset_wrapper(pos1, pos2, func, ...)
 		compressed_data = compressed_data
 	}, command_invoker)
 
-	return rv
+	return unpack(return_values)
 	-- Note: param1, param2 and metadata are not changed by worldedit.set and
 	-- similar functions
 end
@@ -852,9 +889,12 @@ undo_funcs.nodeids = function(name, data)
 	worldedit.player_notify(name, data.count .. " nodes set")
 end
 undo_info_funcs.nodeids = function(data)
-	return "pos1: " .. minetest.pos_to_string(data.pos1) .. ", pos2: " ..
-		minetest.pos_to_string(data.pos2) .. ", " .. data.count ..
-		" nodes changed"
+	return string.format(
+		'Command: "%s", minp: %s, maxp: %s, %d nodes changed',
+		data.command,
+		minetest.pos_to_string(data.pos1),
+		minetest.pos_to_string(data.pos2),
+		data.count)
 end
 
 -- A helper function to override the simple functions, e.g. cube, sphere, etc.
@@ -862,21 +902,23 @@ local function override_nodeid_changer(command_names, function_name,
 		func_get_boundaries)
 	-- The function from worldedit which changes nodes, e.g. worldedit["cube"]
 	local changer_original = worldedit[function_name]
-	-- The overridden function which uses we_nodeset_wrapper to get the nodes
-	-- before the Worldedit operation (changer_original),
-	-- then executes the Worldedit operation,
-	-- and after that calculates and saves the changes
-	local function changer_overridden(...)
-		-- func_get_boundaries depends on the command; it should determine the
-		-- area within which node ids are changed
-		local pos1, pos2 = func_get_boundaries(...)
-		return we_nodeset_wrapper(pos1, pos2, changer_original, ...)
-	end
 	-- Do the before and after overriding
 	for i = 1, #command_names do
 		override_cc_with_confirm(command_names[i],
-			function()
-				worldedit[function_name] = changer_overridden
+			function(params)
+				-- The overridden function uses we_nodeset_wrapper to get the
+				-- nodes before the Worldedit operation changer_original,
+				-- then executes the Worldedit operation,
+				-- and after that calculates and saves the changes
+				worldedit[function_name] = function(...)
+					-- func_get_boundaries depends on the command;
+					-- it should determine the area within which node ids are
+					-- changed
+					local pos1, pos2 = func_get_boundaries(...)
+					local command = command_names[i] .. " " .. params
+					return we_nodeset_wrapper(pos1, pos2, command,
+						changer_original, ...)
+				end
 			end,
 			function()
 				worldedit[function_name] = changer_original
@@ -971,6 +1013,7 @@ override_nodeid_changer({"/spiral"}, "spiral",
 
 
 local we_deserialize = worldedit.deserialize
+local my_we_deserialize_currrent_command
 local function my_we_deserialize(pos_base, ...)
 	-- remember the previous nodes and meta
 	-- Collect the changes by overriding minetest.add_node since this is
@@ -1132,6 +1175,7 @@ local function my_we_deserialize(pos_base, ...)
 	}
 	add_to_history({
 		type = "nodes",
+		command = my_we_deserialize_currrent_command,
 		mem_use = #compressed_data,
 		pos1 = minp,
 		pos2 = maxp,
@@ -1146,7 +1190,8 @@ local function my_we_deserialize(pos_base, ...)
 	return count
 end
 override_cc_with_confirm("/load",
-	function()
+	function(params)
+		my_we_deserialize_currrent_command = "/load " .. params
 		worldedit.deserialize = my_we_deserialize
 	end,
 	function()
@@ -1156,7 +1201,7 @@ override_cc_with_confirm("/load",
 
 
 -- A helper function to override a complex function, e.g. mtschemplace
-local function get_overridden_changer(changer_original, func_get_boundaries,
+local function get_overridden_changer(command, changer_original, func_get_boundaries,
 		collect_meta)
 	return function(...)
 		-- Get the boundary positions
@@ -1175,6 +1220,7 @@ local function get_overridden_changer(changer_original, func_get_boundaries,
 		local compressed_data = compress_nodedata(changes)
 		add_to_history({
 			type = "nodes",
+			command = command,
 			mem_use = #compressed_data,
 			pos1 = pos1,
 			pos2 = pos2,
@@ -1192,27 +1238,28 @@ local function get_overridden_changer(changer_original, func_get_boundaries,
 end
 
 local original_place_schematic = minetest.place_schematic
-local my_place_schematic = get_overridden_changer(original_place_schematic,
-	function(pos, schematic_path, rotation, _, _, flags)
-		-- Get the area which is changed by the schematic
-		if rotation then
-			minetest.log("error",
-				"Received a rotation from worldedit's schematic placement; " ..
-				"not yet implemented in we_undo")
-		end
-		if flags then
-			minetest.log("error",
-				"Received flags from worldedit's schematic placement; " ..
-				"not yet implemented in we_undo")
-		end
-		local schem = minetest.read_schematic(schematic_path, {})
-		local pos1 = pos
-		local pos2 = vector.subtract(vector.add(pos1, schem.size), 1)
-		return pos1, pos2
-	end, false)
 override_cc_with_confirm("/mtschemplace",
-	function()
-		minetest.place_schematic = my_place_schematic
+	function(params)
+		minetest.place_schematic = get_overridden_changer(
+			"/mtschemplace " .. params,
+			original_place_schematic,
+			function(pos, schematic_path, rotation, _, _, flags)
+				-- Get the area which is changed by the schematic
+				if rotation then
+					minetest.log("error",
+						"Received a rotation from worldedit's schematic " ..
+						"placement; not yet implemented in we_undo")
+				end
+				if flags then
+					minetest.log("error",
+						"Received flags from worldedit's schematic " ..
+						"placement; not yet implemented in we_undo")
+				end
+				local schem = minetest.read_schematic(schematic_path, {})
+				local pos1 = pos
+				local pos2 = vector.subtract(vector.add(pos1, schem.size), 1)
+				return pos1, pos2
+			end, false)
 	end,
 	function()
 		minetest.place_schematic = original_place_schematic
@@ -1220,19 +1267,20 @@ override_cc_with_confirm("/mtschemplace",
 )
 
 local we_luatransform = worldedit.luatransform
-local my_luatransform = get_overridden_changer(we_luatransform,
-	function(pos1_actual, pos2_actual)
-		local pos1_further, pos2_further = worldedit.sort_pos(pos1_actual,
-			pos2_actual)
-		-- For safety, add a bit extra space since players can do arbitrary
-		-- things at arbitrary positions with luatransform
-		pos1_further = vector.subtract(pos1_further, 5)
-		pos2_further = vector.add(pos2_further, 5)
-		return pos1_further, pos2_further
-	end, true)
 override_cc_with_confirm("/luatransform",
-	function()
-		worldedit.luatransform = my_luatransform
+	function(params)
+		worldedit.luatransform = get_overridden_changer(
+			"/luatransform " .. params,
+			we_luatransform,
+			function(pos1_actual, pos2_actual)
+				local pos1_further, pos2_further = worldedit.sort_pos(pos1_actual,
+					pos2_actual)
+				-- For safety, add a bit extra space since players can do arbitrary
+				-- things at arbitrary positions with luatransform
+				pos1_further = vector.subtract(pos1_further, 5)
+				pos2_further = vector.add(pos2_further, 5)
+				return pos1_further, pos2_further
+			end, true)
 	end,
 	function()
 		worldedit.luatransform = we_luatransform
@@ -1242,11 +1290,11 @@ override_cc_with_confirm("/luatransform",
 local function override_we_changer(command_name, function_name, collect_meta,
 		func_get_boundaries)
 	local original_changer = worldedit[function_name]
-	local my_changer = get_overridden_changer(original_changer,
-		func_get_boundaries, collect_meta)
 	override_cc_with_confirm(command_name,
-		function()
-			worldedit[function_name] = my_changer
+		function(params)
+			local command = command_name .. " " .. params
+			worldedit[function_name] = get_overridden_changer(command,
+				original_changer, func_get_boundaries, collect_meta)
 		end,
 		function()
 			worldedit[function_name] = original_changer
